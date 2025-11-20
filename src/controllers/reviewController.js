@@ -370,12 +370,19 @@ class ReviewController {
             }
           }
 
-          return {
+          const enrichedReview = {
             ...review,
             salon: salon || null,
             booking: booking || null,
             service: service || null,
           };
+          
+          // Debug logging
+          if (!salon) {
+            console.warn(`⚠️ No salon data found for review ${review.id}, salon_id: ${review.salon_id}`);
+          }
+          
+          return enrichedReview;
         })
       );
 
