@@ -317,37 +317,72 @@ class ReviewController {
     const clientId = req.user.id;
 
     try {
-      const { data: reviews, error } = await supabase
+      // Use supabaseAdmin to bypass RLS and ensure we can fetch all reviews
+      // First, get the reviews
+      const { data: reviews, error } = await supabaseAdmin
         .from('reviews')
-        .select(`
-          *,
-          salon:salons!reviews_salon_id_fkey(
-            id,
-            business_name,
-            image_url
-          ),
-          booking:bookings!reviews_booking_id_fkey(
-            id,
-            appointment_date,
-            service_id
-          ),
-          service:services!bookings_service_id_fkey(
-            id,
-            name
-          )
-        `)
+        .select('*')
         .eq('client_id', clientId)
         .order('created_at', { ascending: false });
 
       if (error) {
         console.error('Error fetching user reviews:', error);
+        console.error('Error details:', JSON.stringify(error, null, 2));
         throw new AppError('Failed to fetch reviews', 500, 'REVIEWS_FETCH_FAILED');
       }
+
+      // Then, enrich with related data
+      const enrichedReviews = await Promise.all(
+        (reviews || []).map(async (review) => {
+          // Get salon info
+          const { data: salon } = await supabaseAdmin
+            .from('salons')
+            .select('id, business_name, image_url')
+            .eq('id', review.salon_id)
+            .single();
+
+          // Get booking and service info if booking_id exists
+          let booking = null;
+          let service = null;
+          
+          if (review.booking_id) {
+            const { data: bookingData } = await supabaseAdmin
+              .from('bookings')
+              .select('id, appointment_date, service_id')
+              .eq('id', review.booking_id)
+              .single();
+
+            if (bookingData) {
+              booking = bookingData;
+              
+              // Get service info
+              if (bookingData.service_id) {
+                const { data: serviceData } = await supabaseAdmin
+                  .from('services')
+                  .select('id, name')
+                  .eq('id', bookingData.service_id)
+                  .single();
+                
+                if (serviceData) {
+                  service = serviceData;
+                }
+              }
+            }
+          }
+
+          return {
+            ...review,
+            salon: salon || null,
+            booking: booking || null,
+            service: service || null,
+          };
+        })
+      );
 
       res.status(200).json({
         success: true,
         data: {
-          reviews: reviews || [],
+          reviews: enrichedReviews || [],
         },
       });
     } catch (error) {
