@@ -99,7 +99,8 @@ class ReviewController {
     try {
       // If booking_id is provided, verify it belongs to the user and is completed
       if (booking_id) {
-        const { data: booking, error: bookingError } = await supabase
+        // Use supabaseAdmin to bypass RLS for past bookings
+        const { data: booking, error: bookingError } = await supabaseAdmin
           .from('bookings')
           .select('*')
           .eq('id', booking_id)
@@ -367,8 +368,8 @@ class ReviewController {
     }
 
     try {
-      // Get booking
-      const { data: booking, error: bookingError } = await supabase
+      // Get booking (use supabaseAdmin to bypass RLS for past bookings)
+      const { data: booking, error: bookingError } = await supabaseAdmin
         .from('bookings')
         .select('*')
         .eq('id', bookingId)
