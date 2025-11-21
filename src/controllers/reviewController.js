@@ -33,11 +33,12 @@ class ReviewController {
           // Get client info using supabaseAdmin to bypass RLS
           let client = null;
           try {
+            // Use .maybeSingle() instead of .single() to avoid errors when no data exists
             const { data: clientData, error: clientError } = await supabaseAdmin
               .from('user_profiles')
               .select('id, first_name, last_name, avatar')
               .eq('id', review.client_id)
-              .single();
+              .maybeSingle();
             
             if (clientError) {
               console.error(`❌ Error fetching client for review ${review.id}:`, JSON.stringify(clientError, null, 2));
@@ -50,27 +51,11 @@ class ReviewController {
               };
               console.log(`✅ Fetched client for review ${review.id}: ${clientData.first_name} ${clientData.last_name}`);
             } else {
-              // Try without .single() to see if client exists
-              const { data: checkData, error: checkError } = await supabaseAdmin
-                .from('user_profiles')
-                .select('id, first_name, last_name')
-                .eq('id', review.client_id)
-                .limit(1);
-              
-              if (checkError) {
-                console.error(`❌ Check query error for client ${review.client_id}:`, JSON.stringify(checkError, null, 2));
-              } else if (checkData && checkData.length > 0) {
-                console.warn(`⚠️ Client exists but .single() returned null for review ${review.id}, client_id: ${review.client_id}`);
-                client = {
-                  ...checkData[0],
-                  avatar_url: checkData[0].avatar,
-                };
-              } else {
-                console.warn(`⚠️ Client does not exist in database for review ${review.id}, client_id: ${review.client_id}`);
-              }
+              console.warn(`⚠️ Client not found for review ${review.id}, client_id: ${review.client_id}`);
             }
           } catch (e) {
             console.error(`❌ Exception fetching client for review ${review.id}:`, e);
+            console.error(`   Stack: ${e.stack}`);
           }
 
           // Get booking and service info if booking_id exists
@@ -83,7 +68,7 @@ class ReviewController {
                 .from('bookings')
                 .select('id, appointment_date, service_id')
                 .eq('id', review.booking_id)
-                .single();
+                .maybeSingle();
 
               if (bookingError) {
                 console.error(`Error fetching booking for review ${review.id}:`, bookingError);
@@ -95,7 +80,7 @@ class ReviewController {
                   .from('services')
                   .select('id, name')
                   .eq('id', bookingData.service_id)
-                  .single();
+                  .maybeSingle();
                 
                 if (serviceError) {
                   console.error(`Error fetching service for review ${review.id}:`, serviceError);
@@ -417,11 +402,12 @@ class ReviewController {
           // Get salon info
           let salon = null;
           try {
+            // Use .maybeSingle() instead of .single() to avoid errors when no data exists
             const { data: salonData, error: salonError } = await supabaseAdmin
               .from('salons')
               .select('id, business_name, image_url')
               .eq('id', review.salon_id)
-              .single();
+              .maybeSingle();
             
             if (salonError) {
               console.error(`❌ Error fetching salon for review ${review.id}:`, JSON.stringify(salonError, null, 2));
@@ -431,21 +417,7 @@ class ReviewController {
               salon = salonData;
               console.log(`✅ Fetched salon for review ${review.id}: ${salonData.business_name}`);
             } else {
-              // Try without .single() to see if salon exists
-              const { data: checkData, error: checkError } = await supabaseAdmin
-                .from('salons')
-                .select('id, business_name')
-                .eq('id', review.salon_id)
-                .limit(1);
-              
-              if (checkError) {
-                console.error(`❌ Check query error for salon ${review.salon_id}:`, JSON.stringify(checkError, null, 2));
-              } else if (checkData && checkData.length > 0) {
-                console.warn(`⚠️ Salon exists but .single() returned null for review ${review.id}, salon_id: ${review.salon_id}`);
-                salon = checkData[0];
-              } else {
-                console.warn(`⚠️ Salon does not exist in database for review ${review.id}, salon_id: ${review.salon_id}`);
-              }
+              console.warn(`⚠️ Salon not found for review ${review.id}, salon_id: ${review.salon_id}`);
             }
           } catch (e) {
             console.error(`❌ Exception fetching salon for review ${review.id}:`, e);
@@ -462,7 +434,7 @@ class ReviewController {
                 .from('bookings')
                 .select('id, appointment_date, service_id')
                 .eq('id', review.booking_id)
-                .single();
+                .maybeSingle();
 
               if (bookingError) {
                 console.error(`❌ Error fetching booking for review ${review.id}:`, bookingError);
@@ -475,7 +447,7 @@ class ReviewController {
                     .from('services')
                     .select('id, name')
                     .eq('id', bookingData.service_id)
-                    .single();
+                    .maybeSingle();
                   
                   if (serviceError) {
                     console.error(`❌ Error fetching service for review ${review.id}:`, serviceError);
