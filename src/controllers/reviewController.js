@@ -40,8 +40,9 @@ class ReviewController {
               .single();
             
             if (clientError) {
-              console.error(`❌ Error fetching client for review ${review.id}:`, clientError);
+              console.error(`❌ Error fetching client for review ${review.id}:`, JSON.stringify(clientError, null, 2));
               console.error(`   Client ID: ${review.client_id}`);
+              console.error(`   Error code: ${clientError.code}, message: ${clientError.message}`);
             } else if (clientData) {
               client = {
                 ...clientData,
@@ -49,7 +50,24 @@ class ReviewController {
               };
               console.log(`✅ Fetched client for review ${review.id}: ${clientData.first_name} ${clientData.last_name}`);
             } else {
-              console.warn(`⚠️ No client data returned for review ${review.id}, client_id: ${review.client_id}`);
+              // Try without .single() to see if client exists
+              const { data: checkData, error: checkError } = await supabaseAdmin
+                .from('user_profiles')
+                .select('id, first_name, last_name')
+                .eq('id', review.client_id)
+                .limit(1);
+              
+              if (checkError) {
+                console.error(`❌ Check query error for client ${review.client_id}:`, JSON.stringify(checkError, null, 2));
+              } else if (checkData && checkData.length > 0) {
+                console.warn(`⚠️ Client exists but .single() returned null for review ${review.id}, client_id: ${review.client_id}`);
+                client = {
+                  ...checkData[0],
+                  avatar_url: checkData[0].avatar,
+                };
+              } else {
+                console.warn(`⚠️ Client does not exist in database for review ${review.id}, client_id: ${review.client_id}`);
+              }
             }
           } catch (e) {
             console.error(`❌ Exception fetching client for review ${review.id}:`, e);
@@ -406,16 +424,32 @@ class ReviewController {
               .single();
             
             if (salonError) {
-              console.error(`❌ Error fetching salon for review ${review.id}:`, salonError);
+              console.error(`❌ Error fetching salon for review ${review.id}:`, JSON.stringify(salonError, null, 2));
               console.error(`   Salon ID: ${review.salon_id}`);
+              console.error(`   Error code: ${salonError.code}, message: ${salonError.message}`);
             } else if (salonData) {
               salon = salonData;
               console.log(`✅ Fetched salon for review ${review.id}: ${salonData.business_name}`);
             } else {
-              console.warn(`⚠️ No salon data returned for review ${review.id}, salon_id: ${review.salon_id}`);
+              // Try without .single() to see if salon exists
+              const { data: checkData, error: checkError } = await supabaseAdmin
+                .from('salons')
+                .select('id, business_name')
+                .eq('id', review.salon_id)
+                .limit(1);
+              
+              if (checkError) {
+                console.error(`❌ Check query error for salon ${review.salon_id}:`, JSON.stringify(checkError, null, 2));
+              } else if (checkData && checkData.length > 0) {
+                console.warn(`⚠️ Salon exists but .single() returned null for review ${review.id}, salon_id: ${review.salon_id}`);
+                salon = checkData[0];
+              } else {
+                console.warn(`⚠️ Salon does not exist in database for review ${review.id}, salon_id: ${review.salon_id}`);
+              }
             }
           } catch (e) {
             console.error(`❌ Exception fetching salon for review ${review.id}:`, e);
+            console.error(`   Stack: ${e.stack}`);
           }
 
           // Get booking and service info if booking_id exists
