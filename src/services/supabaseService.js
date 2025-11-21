@@ -260,7 +260,7 @@ class SupabaseService {
       user_id: userId,
       language: 'en',
       theme: 'light',
-      color_scheme: 'orange',
+      color_scheme: 'neutral',
       notifications_enabled: true,
       email_notifications: true,
       sms_notifications: false,
