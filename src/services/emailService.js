@@ -721,6 +721,126 @@ class EmailService {
       </html>
     `;
   }
+
+  // Send review notification email to salon owner
+  async sendReviewNotification(data) {
+    if (!this._checkEmailEnabled()) return null;
+
+    try {
+      const mailOptions = {
+        from: this.fromEmail,
+        to: data.salon.email,
+        subject: `New Review Received - ${data.salon.business_name}`,
+        html: this._generateReviewNotificationTemplate(data),
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      return result;
+    } catch (error) {
+      console.error('Failed to send review notification email:', error);
+      return null;
+    }
+  }
+
+  // Generate review notification template
+  _generateReviewNotificationTemplate(data) {
+    const clientName = `${data.client.first_name} ${data.client.last_name}`.trim() || 'A client';
+    const stars = '⭐'.repeat(data.review.rating);
+    const emptyStars = '☆'.repeat(5 - data.review.rating);
+    const formattedDate = new Date(data.review.created_at).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .content { background: #f9f9f9; padding: 30px; }
+          .review-card { background: white; padding: 25px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+          .rating { font-size: 24px; color: #FFD700; margin: 15px 0; }
+          .comment { background: #f5f5f5; padding: 15px; border-left: 4px solid #667eea; margin: 15px 0; border-radius: 4px; font-style: italic; }
+          .details { background: white; padding: 20px; margin: 15px 0; border-radius: 8px; }
+          .detail-row { margin: 10px 0; padding: 8px 0; border-bottom: 1px solid #eee; }
+          .detail-row:last-child { border-bottom: none; }
+          .detail-label { font-weight: bold; color: #666; display: inline-block; width: 120px; }
+          .detail-value { color: #333; }
+          .footer { background: #333; color: white; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; font-size: 12px; }
+          .no-comment { color: #999; font-style: italic; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>⭐ New Review Received!</h1>
+            <p>${data.salon.business_name}</p>
+          </div>
+          
+          <div class="content">
+            <p>Hi ${data.owner.first_name},</p>
+            <p>Great news! You've received a new review from <strong>${clientName}</strong>.</p>
+            
+            <div class="review-card">
+              <h2 style="margin-top: 0; color: #667eea;">Review Details</h2>
+              
+              <div class="rating">
+                ${stars}${emptyStars} <span style="font-size: 18px; color: #333; margin-left: 10px;">${data.review.rating} out of 5 stars</span>
+              </div>
+              
+              <div class="details">
+                <div class="detail-row">
+                  <span class="detail-label">Client:</span>
+                  <span class="detail-value">${clientName}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Service:</span>
+                  <span class="detail-value">${data.review.service_name}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Date:</span>
+                  <span class="detail-value">${formattedDate}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Rating:</span>
+                  <span class="detail-value">${data.review.rating} / 5</span>
+                </div>
+              </div>
+              
+              ${data.review.comment ? `
+                <div class="comment">
+                  <strong>Comment:</strong><br>
+                  "${data.review.comment}"
+                </div>
+              ` : `
+                <div class="no-comment">
+                  No comment provided with this review.
+                </div>
+              `}
+            </div>
+            
+            <p>This review is now visible on your salon's profile page. Keep up the great work!</p>
+            
+            <p style="margin-top: 30px;">
+              <strong>💡 Tip:</strong> Responding to reviews helps build trust with potential customers. 
+              Consider thanking your clients for their feedback!
+            </p>
+          </div>
+          
+          <div class="footer">
+            <p>&copy; ${new Date().getFullYear()} SalonTime. All rights reserved.</p>
+            <p>This is an automated notification. Please do not reply to this email.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
 }
 
 module.exports = new EmailService();

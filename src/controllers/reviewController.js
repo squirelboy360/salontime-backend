@@ -1,5 +1,7 @@
 const { supabase, supabaseAdmin } = require('../config/database');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
+const emailService = require('../services/emailService');
+const supabaseService = require('../services/supabaseService');
 
 class ReviewController {
   // Get reviews for a salon
@@ -254,6 +256,14 @@ class ReviewController {
 
       // Update salon rating_average and rating_count
       await this._updateSalonRating(salon_id);
+
+      // Send email notification to salon owner
+      try {
+        await this._sendReviewNotificationEmail(review, clientData, salon_id);
+      } catch (emailError) {
+        console.error('Failed to send review notification email:', emailError);
+        // Don't fail the review creation if email fails
+      }
 
       res.status(201).json({
         success: true,
@@ -592,6 +602,91 @@ class ReviewController {
       }
     } catch (error) {
       console.error('Error in _updateSalonRating:', error);
+    }
+  }
+
+  // Send email notification to salon owner when they receive a review
+  async _sendReviewNotificationEmail(review, client, salonId) {
+    try {
+      // Get salon information
+      const { data: salon, error: salonError } = await supabaseAdmin
+        .from('salons')
+        .select('id, business_name, email, owner_id')
+        .eq('id', salonId)
+        .maybeSingle();
+
+      if (salonError || !salon) {
+        console.error('Error fetching salon for review notification:', salonError);
+        return;
+      }
+
+      // Get salon owner information
+      const { data: owner, error: ownerError } = await supabaseAdmin
+        .from('user_profiles')
+        .select('id, first_name, last_name, email')
+        .eq('id', salon.owner_id)
+        .maybeSingle();
+
+      if (ownerError || !owner) {
+        console.error('Error fetching salon owner for review notification:', ownerError);
+        return;
+      }
+
+      // Get service name if booking_id exists
+      let serviceName = 'Service';
+      if (review.booking_id) {
+        const { data: booking } = await supabaseAdmin
+          .from('bookings')
+          .select('service_id')
+          .eq('id', review.booking_id)
+          .maybeSingle();
+        
+        if (booking && booking.service_id) {
+          const { data: service } = await supabaseAdmin
+            .from('services')
+            .select('name')
+            .eq('id', booking.service_id)
+            .maybeSingle();
+          
+          if (service) {
+            serviceName = service.name;
+          }
+        }
+      }
+
+      // Use salon email if available, otherwise use owner email
+      const recipientEmail = salon.email || owner.email;
+      if (!recipientEmail) {
+        console.warn('No email found for salon owner, skipping review notification');
+        return;
+      }
+
+      // Send email notification
+      await emailService.sendReviewNotification({
+        salon: {
+          business_name: salon.business_name,
+          email: recipientEmail,
+        },
+        owner: {
+          first_name: owner.first_name,
+          last_name: owner.last_name,
+        },
+        client: {
+          first_name: client?.first_name || 'A client',
+          last_name: client?.last_name || '',
+        },
+        review: {
+          rating: review.rating,
+          comment: review.comment,
+          service_name: serviceName,
+          created_at: review.created_at,
+        },
+      });
+
+      console.log(`✅ Review notification email sent to ${recipientEmail}`);
+    } catch (error) {
+      console.error('Error sending review notification email:', error);
+      // Don't throw - email failure shouldn't break review creation
     }
   }
 }
