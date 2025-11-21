@@ -397,54 +397,70 @@ class ReviewController {
       const enrichedReviews = await Promise.all(
         (reviews || []).map(async (review) => {
           // Get salon info
-          const { data: salon } = await supabaseAdmin
-            .from('salons')
-            .select('id, business_name, image_url')
-            .eq('id', review.salon_id)
-            .single();
+          let salon = null;
+          try {
+            const { data: salonData, error: salonError } = await supabaseAdmin
+              .from('salons')
+              .select('id, business_name, image_url')
+              .eq('id', review.salon_id)
+              .single();
+            
+            if (salonError) {
+              console.error(`❌ Error fetching salon for review ${review.id}:`, salonError);
+              console.error(`   Salon ID: ${review.salon_id}`);
+            } else if (salonData) {
+              salon = salonData;
+              console.log(`✅ Fetched salon for review ${review.id}: ${salonData.business_name}`);
+            } else {
+              console.warn(`⚠️ No salon data returned for review ${review.id}, salon_id: ${review.salon_id}`);
+            }
+          } catch (e) {
+            console.error(`❌ Exception fetching salon for review ${review.id}:`, e);
+          }
 
           // Get booking and service info if booking_id exists
           let booking = null;
           let service = null;
           
           if (review.booking_id) {
-            const { data: bookingData } = await supabaseAdmin
-              .from('bookings')
-              .select('id, appointment_date, service_id')
-              .eq('id', review.booking_id)
-              .single();
+            try {
+              const { data: bookingData, error: bookingError } = await supabaseAdmin
+                .from('bookings')
+                .select('id, appointment_date, service_id')
+                .eq('id', review.booking_id)
+                .single();
 
-            if (bookingData) {
-              booking = bookingData;
-              
-              // Get service info
-              if (bookingData.service_id) {
-                const { data: serviceData } = await supabaseAdmin
-                  .from('services')
-                  .select('id, name')
-                  .eq('id', bookingData.service_id)
-                  .single();
+              if (bookingError) {
+                console.error(`❌ Error fetching booking for review ${review.id}:`, bookingError);
+              } else if (bookingData) {
+                booking = bookingData;
                 
-                if (serviceData) {
-                  service = serviceData;
+                // Get service info
+                if (bookingData.service_id) {
+                  const { data: serviceData, error: serviceError } = await supabaseAdmin
+                    .from('services')
+                    .select('id, name')
+                    .eq('id', bookingData.service_id)
+                    .single();
+                  
+                  if (serviceError) {
+                    console.error(`❌ Error fetching service for review ${review.id}:`, serviceError);
+                  } else if (serviceData) {
+                    service = serviceData;
+                  }
                 }
               }
+            } catch (e) {
+              console.error(`❌ Exception fetching booking/service for review ${review.id}:`, e);
             }
           }
 
-          const enrichedReview = {
+          return {
             ...review,
-            salon: salon || null,
-            booking: booking || null,
-            service: service || null,
+            salon: salon,
+            booking: booking,
+            service: service,
           };
-          
-          // Debug logging
-          if (!salon) {
-            console.warn(`⚠️ No salon data found for review ${review.id}, salon_id: ${review.salon_id}`);
-          }
-          
-          return enrichedReview;
         })
       );
 
