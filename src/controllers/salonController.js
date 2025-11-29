@@ -479,7 +479,7 @@ class SalonController {
         });
       }
 
-      // Filter by distance if location provided
+      // Filter by distance if location provided AND distance filter explicitly set
       let filteredSalons = salonsWithCoords;
       if (userLat && userLng) {
         filteredSalons = salonsWithCoords.map(salon => {
@@ -488,11 +488,17 @@ class SalonController {
             return { ...salon, distance };
           }
           return salon;
-        }).filter(salon => {
-          // Filter by distance range
-          if (!salon.distance) return true; // Keep salons without coordinates
-          return salon.distance >= minDistanceFilter && salon.distance <= maxDistanceFilter;
         });
+
+        // Only filter by distance if explicitly provided in request
+        if (max_distance || maxDistance || min_distance || minDistance) {
+          filteredSalons = filteredSalons.filter(salon => {
+            // Keep salons without coordinates
+            if (!salon.distance) return true;
+            // Apply distance range filter
+            return salon.distance >= minDistanceFilter && salon.distance <= maxDistanceFilter;
+          });
+        }
 
         // Re-sort by distance if location provided
         if (sortByValue.toLowerCase() === 'distance') {
