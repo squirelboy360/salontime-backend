@@ -15,6 +15,7 @@ router.get('/dashboard', userController.getDashboard);
 
 // Avatar upload (multipart/form-data)
 router.post('/avatar', avatarUpload, userController.uploadAvatar);
+router.delete('/avatar', userController.deleteAvatar);
 
 // Notification settings
 router.get('/notification-settings', userController.getNotificationSettings);

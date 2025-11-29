@@ -186,6 +186,47 @@ class SupabaseService {
     return urlData.publicUrl;
   }
 
+  // Delete all user avatars from storage
+  async deleteUserAvatars(userId) {
+    const config = require('../config');
+    const bucketName = config.supabase.storage_bucket;
+
+    try {
+      // List all files in user's folder
+      const { data: files, error: listError } = await supabaseAdmin.storage
+        .from(bucketName)
+        .list(userId);
+
+      if (listError) {
+        console.error('Error listing user avatars:', listError);
+        throw new AppError('Failed to list avatars', 500, 'AVATAR_LIST_FAILED');
+      }
+
+      // Delete all files if any exist
+      if (files && files.length > 0) {
+        const filesToDelete = files.map(file => `${userId}/${file.name}`);
+        const { error: deleteError } = await supabaseAdmin.storage
+          .from(bucketName)
+          .remove(filesToDelete);
+
+        if (deleteError) {
+          console.error('Error deleting avatars:', deleteError);
+          throw new AppError('Failed to delete avatars', 500, 'AVATAR_DELETE_FAILED');
+        }
+
+        console.log(`✅ Deleted ${files.length} avatar(s) for user ${userId}`);
+      }
+
+      return true;
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      console.error('Error in deleteUserAvatars:', error);
+      throw new AppError('Failed to delete avatars', 500, 'AVATAR_DELETE_FAILED');
+    }
+  }
+
   // Authentication helpers
   async checkUserExists(email) {
     const { data, error } = await supabaseAdmin.auth.admin.getUserByEmail(email);

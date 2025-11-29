@@ -214,7 +214,7 @@ class UserController {
     }
 
     try {
-      // Upload to Supabase Storage
+      // Upload to Supabase Storage (will delete old avatar automatically)
       const avatarUrl = await supabaseService.uploadAvatar(userId, fileBuffer, mimeType, originalFileName);
 
       // Update user profile with new avatar URL
@@ -235,6 +235,35 @@ class UserController {
         throw error;
       }
       throw new AppError('Failed to upload avatar', 500, 'AVATAR_UPLOAD_FAILED');
+    }
+  });
+
+  // Delete user avatar
+  deleteAvatar = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+
+    try {
+      // Delete all avatars from storage bucket
+      await supabaseService.deleteUserAvatars(userId);
+
+      // Update user profile to remove avatar URL
+      const updatedProfile = await supabaseService.updateUserProfile(userId, {
+        avatar_url: null
+      });
+
+      res.status(200).json({
+        success: true,
+        data: {
+          user: updatedProfile
+        },
+        message: 'Avatar deleted successfully'
+      });
+
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError('Failed to delete avatar', 500, 'AVATAR_DELETE_FAILED');
     }
   });
 }
