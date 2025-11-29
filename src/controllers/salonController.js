@@ -90,7 +90,7 @@ class SalonController {
       // Automatically create Stripe Connect account for the salon
       let stripeAccountData = null;
       let onboardingUrl = null;
-      
+
       try {
         // Get user profile for Stripe account creation
         const { data: userProfile } = await supabase
@@ -132,7 +132,7 @@ class SalonController {
         // Redirect to web app root - it will route salon owners to their dashboard
         const returnUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}`;
         const refreshUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}`;
-        
+
         const accountLink = await stripeService.createAccountLink(
           stripeAccount.id,
           returnUrl,
@@ -154,7 +154,7 @@ class SalonController {
 
       res.status(201).json({
         success: true,
-        data: { 
+        data: {
           salon: {
             ...salon,
             stripe_account_id: stripeAccountData?.stripe_account_id || null,
@@ -164,7 +164,7 @@ class SalonController {
             required: true,
             account_created: !!stripeAccountData,
             onboarding_url: onboardingUrl,
-            message: stripeAccountData 
+            message: stripeAccountData
               ? 'Stripe account created. Complete onboarding to receive payments.'
               : 'Salon created successfully. Set up Stripe account to receive payments.'
           }
@@ -217,7 +217,7 @@ class SalonController {
   getMySalon = asyncHandler(async (req, res) => {
     try {
       console.log('Looking for salon with owner_id:', req.user.id);
-      
+
       const { data: salon, error } = await supabaseAdmin
         .from('salons')
         .select('*')
@@ -232,7 +232,7 @@ class SalonController {
           .from('salons')
           .select('id, owner_id, business_name')
           .limit(5);
-        
+
         console.log('All salons in database:', { allSalons, allSalonsError });
         throw new AppError('No salon found for this user', 404, 'SALON_NOT_FOUND');
       }
@@ -301,7 +301,7 @@ class SalonController {
 
   // Search salons with comprehensive filtering
   searchSalons = asyncHandler(async (req, res) => {
-    const { 
+    const {
       q, // search query
       search, // alias for q
       location,
@@ -328,10 +328,10 @@ class SalonController {
       popularOnly,
       open_now,
       openNow,
-      page = 1, 
-      limit = 50 
+      page = 1,
+      limit = 50
     } = req.query;
-    
+
     const offset = (parseInt(page) - 1) * parseInt(limit);
     const searchQuery = q || search;
     const userLat = parseFloat(latitude || lat);
@@ -340,19 +340,19 @@ class SalonController {
     const maxDistanceFilter = parseFloat(max_distance || maxDistance || 1000);
     const minDistanceFilter = parseFloat(min_distance || minDistance || 0);
     const sortByValue = sort || sortBy || 'distance';
-    
+
     // Helper function to calculate distance
     const calculateDistance = (lat1, lon1, lat2, lon2) => {
       const R = 6371; // Earth's radius in km
       const dLat = (lat2 - lat1) * Math.PI / 180;
       const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       return R * c;
     };
-    
+
     // Helper function to check if salon is open now
     const isOpenNow = (businessHours) => {
       if (!businessHours) return false;
@@ -360,11 +360,11 @@ class SalonController {
       const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][now.getDay()];
       const dayHours = businessHours[dayOfWeek];
       if (!dayHours || dayHours.closed === true || dayHours.closed === 'true') return false;
-      
+
       const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
       const openTime = dayHours.open || dayHours.opening;
       const closeTime = dayHours.close || dayHours.closing;
-      
+
       if (!openTime || !closeTime) return false;
       return currentTime >= openTime && currentTime <= closeTime;
     };
@@ -473,9 +473,9 @@ class SalonController {
           const description = (salon.description || '').toLowerCase();
           const city = (salon.city || '').toLowerCase();
           // Check if search matches any field (backup filter)
-          return businessName.includes(searchLower) || 
-                 description.includes(searchLower) || 
-                 city.includes(searchLower);
+          return businessName.includes(searchLower) ||
+            description.includes(searchLower) ||
+            city.includes(searchLower);
         });
       }
 
@@ -506,18 +506,18 @@ class SalonController {
         // If search query exists and no explicit service filter, check if it matches a service
         const searchAsService = searchQuery && !services && !service ? [searchQuery] : [];
         const allServiceFilters = [...serviceList, ...searchAsService];
-        
+
         if (allServiceFilters.length > 0) {
           // Fetch services for all salons to filter
           const salonIds = filteredSalons.map(s => s.id);
-          
+
           if (salonIds.length > 0) {
             const { data: salonServicesData, error: servicesError } = await supabase
               .from('services')
               .select('salon_id, name, category_id, service_categories(name)')
               .in('salon_id', salonIds)
               .eq('is_active', true);
-            
+
             // Group services by salon_id
             const servicesBySalon = {};
             if (!servicesError && salonServicesData) {
@@ -531,13 +531,13 @@ class SalonController {
                 });
               });
             }
-            
+
             // Filter salons that have matching services
             filteredSalons = filteredSalons.filter(salon => {
               const salonServices = servicesBySalon[salon.id] || [];
               return allServiceFilters.some(filterService => {
                 const filterLower = filterService.toLowerCase();
-                return salonServices.some(s => 
+                return salonServices.some(s =>
                   (s.name || '').toLowerCase().includes(filterLower) ||
                   (s.category || '').toLowerCase().includes(filterLower)
                 );
@@ -546,14 +546,14 @@ class SalonController {
           }
         }
       }
-      
+
       // Filter by price range if provided
       const minPriceFilter = parseFloat(req.query.min_price || req.query.minPrice || 0);
       const maxPriceFilter = parseFloat(req.query.max_price || req.query.maxPrice || 10000);
-      
+
       if (minPriceFilter > 0 || maxPriceFilter < 10000) {
         const salonIds = filteredSalons.map(s => s.id);
-        
+
         if (salonIds.length > 0) {
           // Fetch services to check price range
           const { data: salonServicesData, error: servicesError } = await supabase
@@ -561,7 +561,7 @@ class SalonController {
             .select('salon_id, price')
             .in('salon_id', salonIds)
             .eq('is_active', true);
-          
+
           if (!servicesError && salonServicesData) {
             // Group min/max prices by salon
             const pricesBySalon = {};
@@ -573,7 +573,7 @@ class SalonController {
                 pricesBySalon[service.salon_id].max = Math.max(pricesBySalon[service.salon_id].max, service.price);
               }
             });
-            
+
             // Filter salons where price range overlaps with filter
             filteredSalons = filteredSalons.filter(salon => {
               const salonPrices = pricesBySalon[salon.id];
@@ -591,7 +591,20 @@ class SalonController {
       }
 
       // Apply pagination after all filtering (especially important when search query is used)
+      console.log(`🔍 Fetching salons with backend filters:`, {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        offset,
+        totalFiltered: filteredSalons.length,
+        services: services || service,
+        searchQuery,
+        sortBy: sortByValue
+      });
+
       const paginatedSalons = filteredSalons.slice(offset, offset + parseInt(limit));
+
+      console.log(`✅ Found ${filteredSalons.length} salons with backend filters`);
+      console.log(`📄 Returning ${paginatedSalons.length} salons for page ${page}`);
 
       res.status(200).json({
         success: true,
@@ -640,15 +653,15 @@ class SalonController {
       // Update salon with Stripe account ID
       console.log('Updating salon with Stripe account ID:', stripeAccount.id);
       console.log('Salon ID:', salon.id);
-      
+
       // First, let's check if the salon exists with this ID
       const { data: checkSalon, error: checkError } = await supabaseAdmin
         .from('salons')
         .select('id, stripe_account_id, stripe_account_status')
         .eq('id', salon.id);
-      
+
       console.log('Salon check result:', { checkSalon, checkError });
-      
+
       const { data: updateData, error: updateError } = await supabaseAdmin
         .from('salons')
         .update({
@@ -912,7 +925,7 @@ class SalonController {
   getNearbySalons = asyncHandler(async (req, res) => {
     try {
       const { latitude, longitude, radius = 10 } = req.query;
-      
+
       if (!latitude || !longitude) {
         throw new AppError('Latitude and longitude are required', 400, 'MISSING_COORDINATES');
       }
