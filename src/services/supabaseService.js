@@ -396,9 +396,11 @@ class SupabaseService {
     const dbData = {
       parent_id: userId,
       name: memberData.name,
-      relationship: memberData.relationship || memberData.relation,
-      date_of_birth: memberData.date_of_birth
+      relationship: memberData.relation || memberData.relationship || '',
+      date_of_birth: memberData.date_of_birth || null
     };
+
+    console.log('Adding family member with data:', dbData);
 
     const { data, error } = await supabase
       .from('family_members')
@@ -408,7 +410,7 @@ class SupabaseService {
 
     if (error) {
       console.error('Error adding family member:', error);
-      throw new AppError('Failed to add family member', 500, 'DATABASE_ERROR');
+      throw new AppError('Failed to add family member: ' + error.message, 500, 'DATABASE_ERROR');
     }
 
     return data;
