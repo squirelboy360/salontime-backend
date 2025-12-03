@@ -377,7 +377,7 @@ class SupabaseService {
 
   // Family Members Operations
   async getFamilyMembers(userId) {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('family_members')
       .select('*')
       .eq('parent_id', userId)
@@ -402,7 +402,7 @@ class SupabaseService {
 
     console.log('Adding family member with data:', dbData);
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('family_members')
       .insert([dbData])
       .select()
@@ -423,7 +423,7 @@ class SupabaseService {
     if (updates.relation || updates.relationship) dbUpdates.relationship = updates.relation || updates.relationship;
     if (updates.date_of_birth) dbUpdates.date_of_birth = updates.date_of_birth;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('family_members')
       .update(dbUpdates)
       .eq('id', memberId)
@@ -440,7 +440,7 @@ class SupabaseService {
   }
 
   async deleteFamilyMember(userId, memberId) {
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('family_members')
       .delete()
       .eq('id', memberId)
