@@ -1098,7 +1098,7 @@ class SalonController {
       // If no personalized recommendations, fall back to popular salons
       if (!recommendations || recommendations.length === 0) {
         const analyticsService = require('../services/analyticsService');
-        recommendations = await analyticsService.getPopularSalons(
+        const popularResult = await analyticsService.getPopularSalons(
           4.0, // Lower threshold for fallback
           5,   // Minimum reviews
           parseInt(limit),
@@ -1106,19 +1106,21 @@ class SalonController {
           userLng || null,
           50   // 50km radius
         );
+        // Extract salons array from the result structure
+        recommendations = popularResult?.data?.salons || popularResult?.salons || [];
       }
 
       res.status(200).json({
         success: true,
-        data: recommendations,
-        personalized: recommendations.length > 0
+        data: Array.isArray(recommendations) ? recommendations : [],
+        personalized: Array.isArray(recommendations) && recommendations.length > 0
       });
     } catch (error) {
       // If recommendations fail, fall back to popular salons
       console.error('Error getting personalized recommendations:', error);
       try {
         const analyticsService = require('../services/analyticsService');
-        const fallbackSalons = await analyticsService.getPopularSalons(
+        const fallbackResult = await analyticsService.getPopularSalons(
           4.0,
           5,
           parseInt(limit),
@@ -1126,13 +1128,21 @@ class SalonController {
           userLng || null,
           50
         );
+        // Extract salons array from the result structure
+        const fallbackSalons = fallbackResult?.data?.salons || fallbackResult?.salons || [];
         res.status(200).json({
           success: true,
-          data: fallbackSalons,
+          data: Array.isArray(fallbackSalons) ? fallbackSalons : [],
           personalized: false
         });
       } catch (fallbackError) {
-        throw new AppError('Failed to get salon recommendations', 500, 'RECOMMENDATIONS_FAILED');
+        console.error('Error in fallback to popular salons:', fallbackError);
+        // Return empty array instead of throwing error
+        res.status(200).json({
+          success: true,
+          data: [],
+          personalized: false
+        });
       }
     }
   });

@@ -281,50 +281,89 @@ class SupabaseService {
 
   // User Settings Operations
   async getUserSettings(userId) {
-    const { data, error } = await supabase
-      .from('user_settings')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
+    try {
+      console.log(`🔍 Fetching user settings for userId: ${userId}`);
+      
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        // No settings found, create default settings
-        return await this.createUserSettings(userId);
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // No settings found, create default settings
+          console.log('📝 No settings found, creating default settings...');
+          return await this.createUserSettings(userId);
+        }
+        console.error('❌ Error fetching user settings:', error);
+        throw new AppError(
+          `Failed to fetch user settings: ${error.message} (code: ${error.code})`,
+          500,
+          'DATABASE_ERROR'
+        );
       }
-      throw new AppError('Failed to fetch user settings', 500, 'DATABASE_ERROR');
-    }
 
-    return data;
+      console.log('✅ User settings fetched successfully');
+      return data;
+    } catch (err) {
+      console.error('❌ Exception in getUserSettings:', err);
+      if (err instanceof AppError) {
+        throw err;
+      }
+      throw new AppError(`Failed to fetch user settings: ${err.message}`, 500, 'DATABASE_ERROR');
+    }
   }
 
   async createUserSettings(userId) {
-    const defaultSettings = {
-      user_id: userId,
-      language: 'en',
-      theme: 'light',
-      color_scheme: 'neutral',
-      notifications_enabled: true,
-      email_notifications: true,
-      sms_notifications: false,
-      push_notifications: true,
-      booking_reminders: true,
-      marketing_emails: false,
-      location_sharing: true,
-      data_analytics: true
-    };
+    try {
+      console.log(`📝 Creating user settings for userId: ${userId}`);
+      
+      const defaultSettings = {
+        user_id: userId,
+        language: 'en',
+        theme: 'light',
+        color_scheme: 'orange', // Match database default
+        notifications_enabled: true,
+        email_notifications: true,
+        sms_notifications: false,
+        push_notifications: true,
+        booking_reminders: true,
+        marketing_emails: false,
+        location_sharing: true,
+        data_analytics: true
+      };
 
-    const { data, error } = await supabase
-      .from('user_settings')
-      .insert([defaultSettings])
-      .select()
-      .single();
+      const { data, error } = await supabase
+        .from('user_settings')
+        .insert([defaultSettings])
+        .select()
+        .single();
 
-    if (error) {
-      throw new AppError('Failed to create user settings', 500, 'DATABASE_ERROR');
+      if (error) {
+        console.error('❌ Error creating user settings:', error);
+        console.error('❌ Error details:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        throw new AppError(
+          `Failed to create user settings: ${error.message} (code: ${error.code})`,
+          500,
+          'DATABASE_ERROR'
+        );
+      }
+
+      console.log('✅ User settings created successfully');
+      return data;
+    } catch (err) {
+      console.error('❌ Exception in createUserSettings:', err);
+      if (err instanceof AppError) {
+        throw err;
+      }
+      throw new AppError(`Failed to create user settings: ${err.message}`, 500, 'DATABASE_ERROR');
     }
-
-    return data;
   }
 
   async updateUserSettings(userId, updates) {

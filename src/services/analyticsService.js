@@ -102,7 +102,7 @@ async function getTrendingSalons(limit = 10, latitude = null, longitude = null, 
       .from('salons')
       .select(`
         *,
-        owner:user_profiles!salons_owner_id_fkey(first_name, last_name, email)
+        owner:user_profiles!salons_owner_id_fkey(first_name, last_name)
       `)
       .eq('is_active', true)
       .order('trending_score', { ascending: false })
@@ -151,7 +151,7 @@ async function getNewSalons(days = 30, limit = 10, latitude = null, longitude = 
       .from('salons')
       .select(`
         *,
-        owner:user_profiles!salons_owner_id_fkey(first_name, last_name, email)
+        owner:user_profiles!salons_owner_id_fkey(first_name, last_name)
       `)
       .eq('is_active', true)
       .gte('created_at', cutoffDate.toISOString())
@@ -202,7 +202,7 @@ async function getFeaturedSalons(limit = 10, latitude = null, longitude = null, 
       .from('salons')
       .select(`
         *,
-        owner:user_profiles!salons_owner_id_fkey(first_name, last_name, email)
+        owner:user_profiles!salons_owner_id_fkey(first_name, last_name)
       `)
       .eq('is_active', true)
       .eq('is_featured', true)
@@ -251,7 +251,7 @@ async function getPopularSalons(minRating = 4.5, minReviews = 10, limit = 10, la
       .from('salons')
       .select(`
         *,
-        owner:user_profiles!salons_owner_id_fkey(first_name, last_name, email)
+        owner:user_profiles!salons_owner_id_fkey(first_name, last_name)
       `)
       .eq('is_active', true)
       .gte('rating_average', minRating)

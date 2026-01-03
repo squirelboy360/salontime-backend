@@ -4,7 +4,15 @@ const { asyncHandler, AppError } = require('../middleware/errorHandler');
 // Get user's favorite salons
 const getFavorites = asyncHandler(async (req, res) => {
   try {
-    console.log('🔍 Fetching favorites for user:', req.user.id);
+    console.log('🔍 Fetching favorites for user:', req.user?.id);
+    
+    if (!req.user || !req.user.id) {
+      console.error('❌ No user in request');
+      throw new AppError('User not authenticated', 401, 'UNAUTHORIZED');
+    }
+
+    const userId = req.user.id;
+    console.log('🔍 User ID:', userId);
     
     const { data: favorites, error } = await supabaseAdmin
       .from('user_favorites')
@@ -39,12 +47,17 @@ const getFavorites = asyncHandler(async (req, res) => {
           metadata
         )
       `)
-      .eq('user_id', req.user.id)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('❌ Supabase error fetching favorites:', error);
-      throw new AppError(`Failed to fetch favorites: ${error.message}`, 500, 'FAVORITES_FETCH_FAILED');
+      console.error('❌ Supabase error fetching favorites:', {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint
+      });
+      throw new AppError(`Failed to fetch favorites: ${error.message} (code: ${error.code})`, 500, 'FAVORITES_FETCH_FAILED');
     }
 
     console.log(`✅ Found ${(favorites || []).length} favorites`);
