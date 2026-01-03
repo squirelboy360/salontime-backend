@@ -29,7 +29,6 @@ const getFavorites = asyncHandler(async (req, res) => {
           country,
           phone,
           email,
-          image_url,
           images,
           rating_average,
           rating_count,
@@ -41,8 +40,7 @@ const getFavorites = asyncHandler(async (req, res) => {
           featured_until,
           trending_score,
           view_count,
-          business_hours,
-          metadata
+          business_hours
         )
       `)
       .eq('user_id', userId)
