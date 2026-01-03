@@ -155,22 +155,41 @@ async function getNewSalons(days = 30, limit = 10, latitude = null, longitude = 
       `)
       .eq('is_active', true)
       .gte('created_at', cutoffDate.toISOString())
-      .order('created_at', { ascending: false })
-      .limit(limit);
+      .order('created_at', { ascending: false });
+
+    // Apply distance filtering at DB level using bounding box
+    if (latitude && longitude) {
+      const latDelta = radius / 111; // ~111 km per degree latitude
+      const lngDelta = radius / (111 * Math.cos(latitude * Math.PI / 180));
+      query = query
+        .gte('latitude', latitude - latDelta)
+        .lte('latitude', latitude + latDelta)
+        .gte('longitude', longitude - lngDelta)
+        .lte('longitude', longitude + lngDelta)
+        .not('latitude', 'is', null)
+        .not('longitude', 'is', null);
+    }
+
+    query = query.limit(limit * 2); // Fetch more to account for bounding box approximation
 
     const { data, error } = await query;
 
     if (error) throw error;
 
-    // Filter by distance if location provided (client-side for now)
+    // Refine distance filter and calculate exact distances
     let filteredData = data || [];
     if (latitude && longitude && filteredData.length > 0) {
-      filteredData = filteredData.filter(salon => {
-        if (!salon.latitude || !salon.longitude) return false;
-        const distance = calculateDistance(latitude, longitude, salon.latitude, salon.longitude);
-        salon.distance = distance;
-        return distance <= radius;
-      });
+      filteredData = filteredData.map(salon => {
+        if (salon.latitude && salon.longitude) {
+          const distance = calculateDistance(latitude, longitude, salon.latitude, salon.longitude);
+          return { ...salon, distance };
+        }
+        return salon;
+      }).filter(salon => {
+        if (!salon.distance) return false;
+        return salon.distance <= radius;
+      }).sort((a, b) => (a.distance || 9999) - (b.distance || 9999))
+        .slice(0, limit); // Take top N after sorting
     }
 
     return {
@@ -207,22 +226,41 @@ async function getFeaturedSalons(limit = 10, latitude = null, longitude = null, 
       .eq('is_active', true)
       .eq('is_featured', true)
       .or(`featured_until.is.null,featured_until.gte.${now}`)
-      .order('trending_score', { ascending: false })
-      .limit(limit);
+      .order('trending_score', { ascending: false });
+
+    // Apply distance filtering at DB level using bounding box
+    if (latitude && longitude) {
+      const latDelta = radius / 111;
+      const lngDelta = radius / (111 * Math.cos(latitude * Math.PI / 180));
+      query = query
+        .gte('latitude', latitude - latDelta)
+        .lte('latitude', latitude + latDelta)
+        .gte('longitude', longitude - lngDelta)
+        .lte('longitude', longitude + lngDelta)
+        .not('latitude', 'is', null)
+        .not('longitude', 'is', null);
+    }
+
+    query = query.limit(limit * 2); // Fetch more to account for bounding box approximation
 
     const { data, error } = await query;
 
     if (error) throw error;
 
-    // Filter by distance if location provided
+    // Refine distance filter and calculate exact distances
     let filteredData = data || [];
     if (latitude && longitude && filteredData.length > 0) {
-      filteredData = filteredData.filter(salon => {
-        if (!salon.latitude || !salon.longitude) return false;
-        const distance = calculateDistance(latitude, longitude, salon.latitude, salon.longitude);
-        salon.distance = distance;
-        return distance <= radius;
-      });
+      filteredData = filteredData.map(salon => {
+        if (salon.latitude && salon.longitude) {
+          const distance = calculateDistance(latitude, longitude, salon.latitude, salon.longitude);
+          return { ...salon, distance };
+        }
+        return salon;
+      }).filter(salon => {
+        if (!salon.distance) return false;
+        return salon.distance <= radius;
+      }).sort((a, b) => (a.distance || 9999) - (b.distance || 9999))
+        .slice(0, limit);
     }
 
     return {
@@ -257,22 +295,41 @@ async function getPopularSalons(minRating = 4.5, minReviews = 10, limit = 10, la
       .gte('rating_average', minRating)
       .gte('rating_count', minReviews)
       .order('rating_average', { ascending: false })
-      .order('rating_count', { ascending: false })
-      .limit(limit);
+      .order('rating_count', { ascending: false });
+
+    // Apply distance filtering at DB level using bounding box
+    if (latitude && longitude) {
+      const latDelta = radius / 111;
+      const lngDelta = radius / (111 * Math.cos(latitude * Math.PI / 180));
+      query = query
+        .gte('latitude', latitude - latDelta)
+        .lte('latitude', latitude + latDelta)
+        .gte('longitude', longitude - lngDelta)
+        .lte('longitude', longitude + lngDelta)
+        .not('latitude', 'is', null)
+        .not('longitude', 'is', null);
+    }
+
+    query = query.limit(limit * 2); // Fetch more to account for bounding box approximation
 
     const { data, error } = await query;
 
     if (error) throw error;
 
-    // Filter by distance if location provided
+    // Refine distance filter and calculate exact distances
     let filteredData = data || [];
     if (latitude && longitude && filteredData.length > 0) {
-      filteredData = filteredData.filter(salon => {
-        if (!salon.latitude || !salon.longitude) return false;
-        const distance = calculateDistance(latitude, longitude, salon.latitude, salon.longitude);
-        salon.distance = distance;
-        return distance <= radius;
-      });
+      filteredData = filteredData.map(salon => {
+        if (salon.latitude && salon.longitude) {
+          const distance = calculateDistance(latitude, longitude, salon.latitude, salon.longitude);
+          return { ...salon, distance };
+        }
+        return salon;
+      }).filter(salon => {
+        if (!salon.distance) return false;
+        return salon.distance <= radius;
+      }).sort((a, b) => (a.distance || 9999) - (b.distance || 9999))
+        .slice(0, limit);
     }
 
     return {

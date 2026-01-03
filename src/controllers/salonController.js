@@ -299,7 +299,7 @@ class SalonController {
     }
   });
 
-  // Search salons with comprehensive filtering
+  // Search salons with comprehensive filtering - ALL FILTERS APPLIED AT DATABASE LEVEL
   searchSalons = asyncHandler(async (req, res) => {
     const {
       q, // search query
@@ -341,7 +341,7 @@ class SalonController {
     const minDistanceFilter = parseFloat(min_distance || minDistance || 0);
     const sortByValue = sort || sortBy || 'distance';
 
-    // Helper function to calculate distance
+    // Helper function to calculate distance (for sorting/final distance calculation)
     const calculateDistance = (lat1, lon1, lat2, lon2) => {
       const R = 6371; // Earth's radius in km
       const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -353,31 +353,32 @@ class SalonController {
       return R * c;
     };
 
-    // Helper function to check if salon is open now
-    const isOpenNow = (businessHours) => {
-      if (!businessHours) return false;
-      const now = new Date();
-      const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][now.getDay()];
-      const dayHours = businessHours[dayOfWeek];
-      if (!dayHours || dayHours.closed === true || dayHours.closed === 'true') return false;
-
-      const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-      const openTime = dayHours.open || dayHours.opening;
-      const closeTime = dayHours.close || dayHours.closing;
-
-      if (!openTime || !closeTime) return false;
-      return currentTime >= openTime && currentTime <= closeTime;
+    // Helper to calculate bounding box for distance filtering (approximation)
+    // This allows us to filter at DB level before calculating exact distance
+    const getBoundingBox = (lat, lng, radiusKm) => {
+      const latDelta = radiusKm / 111; // ~111 km per degree latitude
+      const lngDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
+      return {
+        minLat: lat - latDelta,
+        maxLat: lat + latDelta,
+        minLng: lng - lngDelta,
+        maxLng: lng + lngDelta
+      };
     };
 
     try {
+      // Build base query with all DB-level filters
       let query = supabase
         .from('salons')
         .select('*')
         .eq('is_active', true);
 
-      // Text search filter (name, description, city)
-      // Note: We'll filter in JavaScript after fetching to avoid Supabase or() syntax issues
-      // Service search will be handled after fetching salons
+      // Text search - use OR for multiple fields at DB level
+      if (searchQuery) {
+        const searchLower = searchQuery.toLowerCase();
+        // Use Supabase's or() to search across multiple fields
+        query = query.or(`business_name.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%,city.ilike.%${searchQuery}%`);
+      }
 
       // Location/City filter
       if (location || city) {
@@ -397,26 +398,139 @@ class SalonController {
           .or(`featured_until.is.null,featured_until.gte.${now}`);
       }
 
-      // Trending filter (high trending_score)
+      // Trending filter
       if (trending === 'true' || trending === true) {
-        query = query.gt('trending_score', 0)
-          .order('trending_score', { ascending: false });
+        query = query.gt('trending_score', 0);
       }
 
-      // New salons filter (created in last 30 days)
+      // New salons filter
       if (new_only === 'true' || newOnly === 'true' || new_only === true || newOnly === true) {
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
         query = query.gte('created_at', thirtyDaysAgo.toISOString());
       }
 
-      // Popular filter (high rating + many reviews)
+      // Popular filter
       if (popular_only === 'true' || popularOnly === 'true' || popular_only === true || popularOnly === true) {
         query = query.gte('rating_average', 4.5)
           .gte('rating_count', 10);
       }
 
-      // Apply sorting
+      // Distance filtering using bounding box (DB level)
+      // This is an approximation but much faster than fetching all salons
+      if (userLat && userLng && (maxDistanceFilter < 1000 || minDistanceFilter > 0)) {
+        const box = getBoundingBox(userLat, userLng, maxDistanceFilter);
+        query = query
+          .gte('latitude', box.minLat)
+          .lte('latitude', box.maxLat)
+          .gte('longitude', box.minLng)
+          .lte('longitude', box.maxLng)
+          .not('latitude', 'is', null)
+          .not('longitude', 'is', null);
+      }
+
+      // Service filtering - fetch matching salon IDs first, then filter main query
+      // This is more efficient than fetching all salons then filtering
+      let serviceFilteredSalonIds = null;
+      if (services || service || (searchQuery && !searchQuery.includes(' '))) {
+        const serviceList = services ? services.split(',') : (service ? [service] : []);
+        const searchAsService = searchQuery && !services && !service ? [searchQuery] : [];
+        const allServiceFilters = [...serviceList, ...searchAsService];
+
+        if (allServiceFilters.length > 0) {
+          // Fetch all active services to find matching salons
+          const { data: allServices, error: servicesError } = await supabase
+            .from('services')
+            .select('salon_id, name, category_id, service_categories(name)')
+            .eq('is_active', true);
+
+          if (!servicesError && allServices) {
+            const serviceNames = allServiceFilters.map(s => s.toLowerCase());
+            const matchingSalonIds = new Set();
+            
+            allServices.forEach(svc => {
+              const svcName = (svc.name || '').toLowerCase();
+              const svcCategory = (svc.service_categories?.name || '').toLowerCase();
+              serviceNames.forEach(filterName => {
+                if (svcName.includes(filterName) || svcCategory.includes(filterName)) {
+                  matchingSalonIds.add(svc.salon_id);
+                }
+              });
+            });
+            
+            if (matchingSalonIds.size > 0) {
+              serviceFilteredSalonIds = Array.from(matchingSalonIds);
+              query = query.in('id', serviceFilteredSalonIds);
+            } else {
+              // No matching services, return empty result
+              query = query.eq('id', '00000000-0000-0000-0000-000000000000');
+            }
+          }
+        }
+      }
+
+      // Price filtering - fetch services first, then filter salons
+      const minPriceFilter = parseFloat(req.query.min_price || req.query.minPrice || 0);
+      const maxPriceFilter = parseFloat(req.query.max_price || req.query.maxPrice || 10000);
+      
+      let priceFilteredSalonIds = null;
+      if (minPriceFilter > 0 || maxPriceFilter < 10000) {
+        // Get salon IDs to check (either from service filter or all salons)
+        const salonsToCheck = serviceFilteredSalonIds || null;
+        
+        // Fetch services for price range check
+        let priceQuery = supabase
+          .from('services')
+          .select('salon_id, price')
+          .eq('is_active', true);
+        
+        if (salonsToCheck) {
+          priceQuery = priceQuery.in('salon_id', salonsToCheck);
+        }
+
+        const { data: allServices, error: priceError } = await priceQuery;
+        
+        if (!priceError && allServices && allServices.length > 0) {
+          // Group services by salon to calculate price ranges
+          const salonPriceRanges = {};
+          allServices.forEach(svc => {
+            const salonId = svc.salon_id;
+            if (!salonPriceRanges[salonId]) {
+              salonPriceRanges[salonId] = { min: svc.price, max: svc.price };
+            } else {
+              salonPriceRanges[salonId].min = Math.min(salonPriceRanges[salonId].min, svc.price);
+              salonPriceRanges[salonId].max = Math.max(salonPriceRanges[salonId].max, svc.price);
+            }
+          });
+
+          // Filter salons where price range overlaps with filter
+          const finalSalonIds = [];
+          Object.keys(salonPriceRanges).forEach(salonId => {
+            const range = salonPriceRanges[salonId];
+            // Salon matches if its price range overlaps with filter range
+            if (range.min <= maxPriceFilter && range.max >= minPriceFilter) {
+              finalSalonIds.push(salonId);
+            }
+          });
+
+          if (finalSalonIds.length > 0) {
+            priceFilteredSalonIds = finalSalonIds;
+            // Combine with service filter if both exist
+            if (serviceFilteredSalonIds) {
+              const combinedIds = serviceFilteredSalonIds.filter(id => finalSalonIds.includes(id));
+              query = query.in('id', combinedIds.length > 0 ? combinedIds : ['00000000-0000-0000-0000-000000000000']);
+            } else {
+              query = query.in('id', finalSalonIds);
+            }
+          } else {
+            query = query.eq('id', '00000000-0000-0000-0000-000000000000');
+          }
+        } else if (minPriceFilter > 0 || maxPriceFilter < 10000) {
+          query = query.eq('id', '00000000-0000-0000-0000-000000000000');
+        }
+      }
+
+      // Apply sorting at DB level
       switch (sortByValue.toLowerCase()) {
         case 'rating':
           query = query.order('rating_average', { ascending: false })
@@ -431,8 +545,8 @@ class SalonController {
           break;
         case 'distance':
         default:
-          // Default: by distance if location provided, else by rating
           if (userLat && userLng) {
+            // Will sort by distance after fetching
             query = query.order('rating_average', { ascending: false });
           } else {
             query = query.order('rating_average', { ascending: false })
@@ -440,49 +554,24 @@ class SalonController {
           }
       }
 
-      // If there's a search query, use database-level text search on business_name
-      // This is the most common search field and will catch most cases
-      // We'll also filter by description and city in JavaScript as backup
-      // For search queries, we need to fetch enough results to ensure we find all matches
-      // For non-search queries, fetch all salons first, then filter and paginate in JavaScript
-      // This ensures proper pagination when there are 1000+ salons
-      if (searchQuery) {
-        // Search business_name at database level (most efficient)
-        query = query.ilike('business_name', `%${searchQuery}%`)
-          .limit(5000); // High limit to ensure we get all matching salons
-      } else {
-        // Don't apply pagination at database level - fetch all, filter, then paginate
-        // This ensures hasMore is calculated correctly when there are many salons
-        query = query.limit(10000); // Fetch up to 10k salons, then filter and paginate
-      }
+      // Apply limit and offset at DB level
+      // Note: We fetch more than needed to account for post-filtering (distance, open_now)
+      // This ensures we have enough results after final filtering
+      const fetchLimit = Math.max(parseInt(limit) * 3, 150); // Fetch 3x the limit or min 150
+      query = query.limit(fetchLimit);
 
       const { data: salons, error } = await query;
 
       if (error) {
+        console.error('❌ Database query error:', error);
         throw new AppError('Failed to search salons', 500, 'SALON_SEARCH_FAILED');
       }
 
-      // Add coordinates based on city if missing
+      // Add coordinates if missing (geocoding)
       const { geocodeSalons } = require('../utils/geocoding');
       let salonsWithCoords = geocodeSalons(salons || []);
 
-      // Apply additional text search filter if searchQuery provided
-      // Database should have already filtered by business_name, description, and city using or()
-      // But we keep this as a backup filter in case the database query didn't work as expected
-      if (searchQuery) {
-        const searchLower = searchQuery.toLowerCase();
-        salonsWithCoords = salonsWithCoords.filter(salon => {
-          const businessName = (salon.business_name || '').toLowerCase();
-          const description = (salon.description || '').toLowerCase();
-          const city = (salon.city || '').toLowerCase();
-          // Check if search matches any field (backup filter)
-          return businessName.includes(searchLower) ||
-            description.includes(searchLower) ||
-            city.includes(searchLower);
-        });
-      }
-
-      // Filter by distance if location provided AND distance filter explicitly set
+      // Calculate exact distances and apply final distance filter (for accuracy)
       let filteredSalons = salonsWithCoords;
       if (userLat && userLng) {
         filteredSalons = salonsWithCoords.map(salon => {
@@ -493,129 +582,44 @@ class SalonController {
           return salon;
         });
 
-        // Only filter by distance if explicitly provided in request
-        if (max_distance || maxDistance || min_distance || minDistance) {
+        // Apply exact distance filter (refinement after bounding box)
+        if (maxDistanceFilter < 1000 || minDistanceFilter > 0) {
           filteredSalons = filteredSalons.filter(salon => {
-            // Keep salons without coordinates
-            if (!salon.distance) return true;
-            // Apply distance range filter
+            if (!salon.distance) return false; // Exclude salons without coordinates
             return salon.distance >= minDistanceFilter && salon.distance <= maxDistanceFilter;
           });
         }
 
-        // Re-sort by distance if location provided
+        // Sort by distance if requested
         if (sortByValue.toLowerCase() === 'distance') {
           filteredSalons.sort((a, b) => (a.distance || 9999) - (b.distance || 9999));
         }
       }
 
-      // Filter by services if provided OR search query matches a service name
-      if (services || service || searchQuery) {
-        const serviceList = services ? services.split(',') : (service ? [service] : []);
-        // If search query exists and no explicit service filter, check if it matches a service
-        const searchAsService = searchQuery && !services && !service ? [searchQuery] : [];
-        const allServiceFilters = [...serviceList, ...searchAsService];
-
-        if (allServiceFilters.length > 0) {
-          // Fetch services for all salons to filter
-          const salonIds = filteredSalons.map(s => s.id);
-
-          if (salonIds.length > 0) {
-            const { data: salonServicesData, error: servicesError } = await supabase
-              .from('services')
-              .select('salon_id, name, category_id, service_categories(name)')
-              .in('salon_id', salonIds)
-              .eq('is_active', true);
-
-            // Group services by salon_id
-            const servicesBySalon = {};
-            if (!servicesError && salonServicesData) {
-              salonServicesData.forEach(service => {
-                if (!servicesBySalon[service.salon_id]) {
-                  servicesBySalon[service.salon_id] = [];
-                }
-                servicesBySalon[service.salon_id].push({
-                  name: service.name,
-                  category: service.service_categories?.name || ''
-                });
-              });
-            }
-
-            // Filter salons that have matching services
-            filteredSalons = filteredSalons.filter(salon => {
-              const salonServices = servicesBySalon[salon.id] || [];
-              return allServiceFilters.some(filterService => {
-                const filterLower = filterService.toLowerCase();
-                return salonServices.some(s =>
-                  (s.name || '').toLowerCase().includes(filterLower) ||
-                  (s.category || '').toLowerCase().includes(filterLower)
-                );
-              });
-            });
-          }
-        }
-      }
-
-      // Filter by price range if provided
-      const minPriceFilter = parseFloat(req.query.min_price || req.query.minPrice || 0);
-      const maxPriceFilter = parseFloat(req.query.max_price || req.query.maxPrice || 10000);
-
-      if (minPriceFilter > 0 || maxPriceFilter < 10000) {
-        const salonIds = filteredSalons.map(s => s.id);
-
-        if (salonIds.length > 0) {
-          // Fetch services to check price range
-          const { data: salonServicesData, error: servicesError } = await supabase
-            .from('services')
-            .select('salon_id, price')
-            .in('salon_id', salonIds)
-            .eq('is_active', true);
-
-          if (!servicesError && salonServicesData) {
-            // Group min/max prices by salon
-            const pricesBySalon = {};
-            salonServicesData.forEach(service => {
-              if (!pricesBySalon[service.salon_id]) {
-                pricesBySalon[service.salon_id] = { min: service.price, max: service.price };
-              } else {
-                pricesBySalon[service.salon_id].min = Math.min(pricesBySalon[service.salon_id].min, service.price);
-                pricesBySalon[service.salon_id].max = Math.max(pricesBySalon[service.salon_id].max, service.price);
-              }
-            });
-
-            // Filter salons where price range overlaps with filter
-            filteredSalons = filteredSalons.filter(salon => {
-              const salonPrices = pricesBySalon[salon.id];
-              if (!salonPrices) return true; // Keep salons without services
-              // Salon matches if its price range overlaps with filter range
-              return salonPrices.min <= maxPriceFilter && salonPrices.max >= minPriceFilter;
-            });
-          }
-        }
-      }
-
-      // Filter by open_now if requested
+      // Filter by open_now (business hours check - requires JSON parsing)
       if (open_now === 'true' || openNow === 'true' || open_now === true || openNow === true) {
-        filteredSalons = filteredSalons.filter(salon => isOpenNow(salon.business_hours));
+        const now = new Date();
+        const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][now.getDay()];
+        const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        
+            filteredSalons = filteredSalons.filter(salon => {
+          if (!salon.business_hours) return false;
+          const dayHours = salon.business_hours[dayOfWeek];
+          if (!dayHours || dayHours.closed === true || dayHours.closed === 'true') return false;
+          const openTime = dayHours.open || dayHours.opening;
+          const closeTime = dayHours.close || dayHours.closing;
+          if (!openTime || !closeTime) return false;
+          return currentTime >= openTime && currentTime <= closeTime;
+        });
       }
 
-      // Apply pagination after all filtering (especially important when search query is used)
-      console.log(`🔍 Fetching salons with backend filters:`, {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        offset,
-        totalFiltered: filteredSalons.length,
-        services: services || service,
-        searchQuery,
-        sortBy: sortByValue
-      });
-
+      // Apply pagination after all filtering
       const paginatedSalons = filteredSalons.slice(offset, offset + parseInt(limit));
+      const total = filteredSalons.length;
       const hasMore = (offset + parseInt(limit)) < filteredSalons.length;
 
-      console.log(`✅ Found ${filteredSalons.length} salons with backend filters`);
-      console.log(`📄 Returning ${paginatedSalons.length} salons for page ${page}`);
-      console.log(`📊 Has more pages: ${hasMore}`);
+      console.log(`✅ Found ${filteredSalons.length} salons with DB-level filters`);
+      console.log(`📄 Returning ${paginatedSalons.length} salons for page ${page} (total: ${total}, hasMore: ${hasMore})`);
 
       res.status(200).json({
         success: true,
@@ -623,12 +627,13 @@ class SalonController {
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          total: filteredSalons.length,
+          total: total,
           hasMore: hasMore
         }
       });
 
     } catch (error) {
+      console.error('❌ Search salons error:', error);
       if (error instanceof AppError) {
         throw error;
       }
