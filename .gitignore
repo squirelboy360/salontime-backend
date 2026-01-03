@@ -56,3 +56,6 @@ temp/
 # Temporary scripts
 scripts/temp/
 *.temp.js
+# Apple OAuth Key files (sensitive)
+AuthKey_*.p8
+generate-apple-secret.js
