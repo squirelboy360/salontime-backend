@@ -92,7 +92,7 @@ class UserController {
   getNotificationSettings = asyncHandler(async (req, res) => {
     try {
       // Fetch actual settings from user_settings table
-      const settings = await supabaseService.getUserSettings(req.user.id);
+      const settings = await supabaseService.getUserSettings(req.user.id, req.token);
 
       res.status(200).json({
         success: true,
@@ -133,7 +133,7 @@ class UserController {
         push_notifications,
         booking_reminders,
         marketing_emails
-      });
+      }, req.token);
 
       res.status(200).json({
         success: true,

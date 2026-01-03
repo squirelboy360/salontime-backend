@@ -1,4 +1,4 @@
-const { supabase, supabaseAdmin } = require('../config/database');
+const { supabase, supabaseAdmin, getAuthenticatedClient } = require('../config/database');
 const { AppError } = require('../middleware/errorHandler');
 
 class SupabaseService {
@@ -280,11 +280,18 @@ class SupabaseService {
   }
 
   // User Settings Operations
-  async getUserSettings(userId) {
+  async getUserSettings(userId, accessToken) {
     try {
       console.log(`🔍 Fetching user settings for userId: ${userId}`);
       
-      const { data, error } = await supabase
+      if (!accessToken) {
+        throw new AppError('Access token required for user settings', 401, 'MISSING_TOKEN');
+      }
+      
+      // Always use authenticated client with user's token for RLS
+      const client = getAuthenticatedClient(accessToken);
+      
+      const { data, error } = await client
         .from('user_settings')
         .select('*')
         .eq('user_id', userId)
@@ -294,7 +301,7 @@ class SupabaseService {
         if (error.code === 'PGRST116') {
           // No settings found, create default settings
           console.log('📝 No settings found, creating default settings...');
-          return await this.createUserSettings(userId);
+          return await this.createUserSettings(userId, accessToken);
         }
         console.error('❌ Error fetching user settings:', error);
         throw new AppError(
@@ -315,9 +322,13 @@ class SupabaseService {
     }
   }
 
-  async createUserSettings(userId) {
+  async createUserSettings(userId, accessToken) {
     try {
       console.log(`📝 Creating user settings for userId: ${userId}`);
+      
+      if (!accessToken) {
+        throw new AppError('Access token required for user settings', 401, 'MISSING_TOKEN');
+      }
       
       const defaultSettings = {
         user_id: userId,
@@ -334,7 +345,10 @@ class SupabaseService {
         data_analytics: true
       };
 
-      const { data, error } = await supabase
+      // Always use authenticated client with user's token for RLS
+      const client = getAuthenticatedClient(accessToken);
+      
+      const { data, error } = await client
         .from('user_settings')
         .insert([defaultSettings])
         .select()
@@ -366,11 +380,18 @@ class SupabaseService {
     }
   }
 
-  async updateUserSettings(userId, updates) {
+  async updateUserSettings(userId, updates, accessToken) {
     try {
       console.log(`🔧 Updating user settings for userId: ${userId}`, updates);
       
-      const { data, error } = await supabase
+      if (!accessToken) {
+        throw new AppError('Access token required for user settings', 401, 'MISSING_TOKEN');
+      }
+      
+      // Always use authenticated client with user's token for RLS
+      const client = getAuthenticatedClient(accessToken);
+      
+      const { data, error } = await client
         .from('user_settings')
         .update({
           ...updates,

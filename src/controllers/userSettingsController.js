@@ -5,7 +5,7 @@ class UserSettingsController {
   // Get user settings
   getSettings = asyncHandler(async (req, res) => {
     try {
-      const settings = await supabaseService.getUserSettings(req.user.id);
+      const settings = await supabaseService.getUserSettings(req.user.id, req.token);
       
       res.status(200).json({
         success: true,
@@ -54,7 +54,7 @@ class UserSettingsController {
     }
 
     try {
-      const updatedSettings = await supabaseService.updateUserSettings(req.user.id, updates);
+      const updatedSettings = await supabaseService.updateUserSettings(req.user.id, updates, req.token);
 
       res.status(200).json({
         success: true,
@@ -73,7 +73,7 @@ class UserSettingsController {
   // Create default settings for new user
   createDefaultSettings = asyncHandler(async (req, res) => {
     try {
-      const defaultSettings = await supabaseService.createUserSettings(req.user.id);
+      const defaultSettings = await supabaseService.createUserSettings(req.user.id, req.token);
 
       res.status(201).json({
         success: true,
