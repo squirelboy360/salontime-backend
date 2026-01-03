@@ -10,7 +10,7 @@ class AuthController {
     const { provider, user_type } = req.body;
 
     // Validate provider
-    const supportedProviders = ['google', 'facebook']; // Remove apple for now as requested
+    const supportedProviders = ['google', 'facebook', 'apple'];
     if (!supportedProviders.includes(provider)) {
       throw new AppError('Unsupported OAuth provider', 400, 'UNSUPPORTED_PROVIDER');
     }
