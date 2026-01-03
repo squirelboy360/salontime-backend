@@ -27,8 +27,6 @@ const getFavorites = asyncHandler(async (req, res) => {
           state,
           zip_code,
           country,
-          latitude,
-          longitude,
           phone,
           email,
           image_url,
