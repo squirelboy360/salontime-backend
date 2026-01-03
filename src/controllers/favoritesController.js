@@ -14,9 +14,27 @@ const getFavorites = asyncHandler(async (req, res) => {
           description,
           address,
           city,
+          state,
+          zip_code,
+          country,
+          latitude,
+          longitude,
+          phone,
+          email,
+          image_url,
+          images,
           rating_average,
           rating_count,
-          images
+          is_active,
+          owner_id,
+          created_at,
+          updated_at,
+          is_featured,
+          featured_until,
+          trending_score,
+          view_count,
+          business_hours,
+          metadata
         )
       `)
       .eq('user_id', req.user.id)
