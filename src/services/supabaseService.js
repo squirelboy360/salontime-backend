@@ -292,24 +292,24 @@ class SupabaseService {
       const client = getAuthenticatedClient(accessToken);
       
       const { data, error } = await client
-        .from('user_settings')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
+      .from('user_settings')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
 
-      if (error) {
-        if (error.code === 'PGRST116') {
-          // No settings found, create default settings
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // No settings found, create default settings
           console.log('📝 No settings found, creating default settings...');
           return await this.createUserSettings(userId, accessToken);
-        }
+      }
         console.error('❌ Error fetching user settings:', error);
         throw new AppError(
           `Failed to fetch user settings: ${error.message} (code: ${error.code})`,
           500,
           'DATABASE_ERROR'
         );
-      }
+    }
 
       console.log('✅ User settings fetched successfully');
       return data;
@@ -330,31 +330,31 @@ class SupabaseService {
         throw new AppError('Access token required for user settings', 401, 'MISSING_TOKEN');
       }
       
-      const defaultSettings = {
-        user_id: userId,
-        language: 'en',
-        theme: 'light',
+    const defaultSettings = {
+      user_id: userId,
+      language: 'en',
+      theme: 'light',
         color_scheme: 'orange', // Match database default
-        notifications_enabled: true,
-        email_notifications: true,
-        sms_notifications: false,
-        push_notifications: true,
-        booking_reminders: true,
-        marketing_emails: false,
-        location_sharing: true,
-        data_analytics: true
-      };
+      notifications_enabled: true,
+      email_notifications: true,
+      sms_notifications: false,
+      push_notifications: true,
+      booking_reminders: true,
+      marketing_emails: false,
+      location_sharing: true,
+      data_analytics: true
+    };
 
       // Always use authenticated client with user's token for RLS
       const client = getAuthenticatedClient(accessToken);
       
       const { data, error } = await client
-        .from('user_settings')
-        .insert([defaultSettings])
-        .select()
-        .single();
+      .from('user_settings')
+      .insert([defaultSettings])
+      .select()
+      .single();
 
-      if (error) {
+    if (error) {
         console.error('❌ Error creating user settings:', error);
         console.error('❌ Error details:', {
           code: error.code,
@@ -367,10 +367,10 @@ class SupabaseService {
           500,
           'DATABASE_ERROR'
         );
-      }
+    }
 
       console.log('✅ User settings created successfully');
-      return data;
+    return data;
     } catch (err) {
       console.error('❌ Exception in createUserSettings:', err);
       if (err instanceof AppError) {
@@ -392,29 +392,29 @@ class SupabaseService {
       const client = getAuthenticatedClient(accessToken);
       
       const { data, error } = await client
-        .from('user_settings')
-        .update({
-          ...updates,
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_id', userId)
-        .select()
-        .single();
+      .from('user_settings')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId)
+      .select()
+      .single();
 
-      if (error) {
+    if (error) {
         console.error('❌ Error updating user settings:', error);
-        if (error.code === 'PGRST116') {
-          // Settings don't exist, create them first
+      if (error.code === 'PGRST116') {
+        // Settings don't exist, create them first
           console.log('📝 Creating default settings for user...');
-          await this.createUserSettings(userId);
-          // Try update again
-          return await this.updateUserSettings(userId, updates);
-        }
-        throw new AppError(`Failed to update user settings: ${error.message}`, 500, 'DATABASE_ERROR');
+        await this.createUserSettings(userId);
+        // Try update again
+        return await this.updateUserSettings(userId, updates);
       }
+        throw new AppError(`Failed to update user settings: ${error.message}`, 500, 'DATABASE_ERROR');
+    }
 
       console.log('✅ User settings updated successfully');
-      return data;
+    return data;
     } catch (err) {
       console.error('❌ Exception in updateUserSettings:', err);
       throw err;
