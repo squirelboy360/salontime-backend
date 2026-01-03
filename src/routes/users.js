@@ -30,5 +30,8 @@ router.post('/family-members', userController.addFamilyMember);
 router.put('/family-members/:memberId', userController.updateFamilyMember);
 router.delete('/family-members/:memberId', userController.deleteFamilyMember);
 
+// Account deletion
+router.delete('/account', userController.deleteAccount);
+
 module.exports = router;
 

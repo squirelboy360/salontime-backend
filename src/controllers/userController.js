@@ -1,4 +1,5 @@
 const supabaseService = require('../services/supabaseService');
+const { supabaseAdmin } = require('../config/database');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const multer = require('multer');
 const config = require('../config');
@@ -355,6 +356,99 @@ class UserController {
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw new AppError('Failed to delete family member', 500, 'FAMILY_MEMBER_DELETE_FAILED');
+    }
+  });
+
+  // Delete user account
+  deleteAccount = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const { reason } = req.body;
+
+    try {
+      console.log(`🗑️  Deleting account for user: ${userId}`);
+      if (reason) {
+        console.log(`📝 Deletion reason: ${reason}`);
+      }
+
+      // 1. Delete all user's bookings (set status to cancelled or delete)
+      const { error: bookingsError } = await supabaseAdmin
+        .from('bookings')
+        .delete()
+        .eq('client_id', userId);
+
+      if (bookingsError) {
+        console.error('⚠️  Error deleting bookings:', bookingsError);
+        // Continue even if this fails
+      }
+
+      // 2. Delete all user's reviews
+      const { error: reviewsError } = await supabaseAdmin
+        .from('reviews')
+        .delete()
+        .eq('client_id', userId);
+
+      if (reviewsError) {
+        console.error('⚠️  Error deleting reviews:', reviewsError);
+      }
+
+      // 3. Delete all user's favorites
+      const { error: favoritesError } = await supabaseAdmin
+        .from('user_favorites')
+        .delete()
+        .eq('user_id', userId);
+
+      if (favoritesError) {
+        console.error('⚠️  Error deleting favorites:', favoritesError);
+      }
+
+      // 4. Delete all family members
+      const { error: familyError } = await supabaseAdmin
+        .from('family_members')
+        .delete()
+        .eq('user_id', userId);
+
+      if (familyError) {
+        console.error('⚠️  Error deleting family members:', familyError);
+      }
+
+      // 5. Delete user avatars from storage
+      try {
+        await supabaseService.deleteUserAvatars(userId);
+      } catch (avatarError) {
+        console.error('⚠️  Error deleting avatars:', avatarError);
+      }
+
+      // 6. Delete user profile
+      const { error: profileError } = await supabaseAdmin
+        .from('user_profiles')
+        .delete()
+        .eq('id', userId);
+
+      if (profileError) {
+        throw new AppError('Failed to delete user profile', 500, 'PROFILE_DELETE_FAILED');
+      }
+
+      // 7. Delete from Supabase Auth (this will invalidate all tokens)
+      const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+
+      if (authError) {
+        console.error('⚠️  Error deleting auth user:', authError);
+        // Continue even if auth deletion fails - profile is already deleted
+      }
+
+      console.log(`✅ Account deleted successfully for user: ${userId}`);
+
+      res.status(200).json({
+        success: true,
+        message: 'Account deleted successfully'
+      });
+
+    } catch (error) {
+      console.error('❌ Error deleting account:', error);
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError('Failed to delete account', 500, 'ACCOUNT_DELETE_FAILED');
     }
   });
 }
