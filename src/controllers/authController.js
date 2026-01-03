@@ -22,10 +22,22 @@ class AuthController {
     }
 
     // Generate redirect URL with user type
-    const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?user_type=${user_type}`;
+    // For Apple OAuth, we need to use a web URL that Supabase can redirect to
+    // Apple doesn't support deep link redirects in OAuth flow
+    // The web URL should be in Supabase's allowed redirect URLs list
+    let redirectUrl;
+    if (provider === 'apple') {
+      // Use web URL for Apple - must be in Supabase's redirect URLs allowlist
+      // Format: https://www.salontime.nl/auth/callback?user_type=client
+      redirectUrl = `https://www.salontime.nl/auth/callback?user_type=${user_type}`;
+    } else {
+      // For Google and other providers, we can use deep links
+      redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?user_type=${user_type}`;
+    }
 
     try {
       console.log(`🔗 Generating OAuth URL for provider: ${provider}, user_type: ${user_type}`);
+      console.log(`🔗 Using redirect URL: ${redirectUrl}`);
       const oauthUrl = await supabaseService.generateOAuthUrl(provider, redirectUrl);
       console.log(`✅ OAuth URL generated successfully for ${provider}`);
 
