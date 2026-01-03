@@ -13,6 +13,9 @@ router.get('/:salonId/services', salonController.getSalonServices);
 // Protected routes (require authentication)
 router.use(authenticateToken);
 
+// Personalized recommendations (requires auth) - must be before /:salonId route
+router.get('/recommendations/personalized', salonController.getPersonalizedRecommendations);
+
 // Salon owner routes
 router.post('/', salonController.createSalon);
 router.get('/my/salon', salonController.getMySalon);

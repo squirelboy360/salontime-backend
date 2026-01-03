@@ -444,13 +444,16 @@ class SalonController {
       // This is the most common search field and will catch most cases
       // We'll also filter by description and city in JavaScript as backup
       // For search queries, we need to fetch enough results to ensure we find all matches
-      // Otherwise, apply pagination now for efficiency
+      // For non-search queries, fetch all salons first, then filter and paginate in JavaScript
+      // This ensures proper pagination when there are 1000+ salons
       if (searchQuery) {
         // Search business_name at database level (most efficient)
         query = query.ilike('business_name', `%${searchQuery}%`)
           .limit(5000); // High limit to ensure we get all matching salons
       } else {
-        query = query.range(offset, offset + parseInt(limit) - 1);
+        // Don't apply pagination at database level - fetch all, filter, then paginate
+        // This ensures hasMore is calculated correctly when there are many salons
+        query = query.limit(10000); // Fetch up to 10k salons, then filter and paginate
       }
 
       const { data: salons, error } = await query;
@@ -1053,6 +1056,84 @@ class SalonController {
         throw error;
       }
       throw new AppError('Failed to fetch salon services', 500, 'SERVICES_FETCH_FAILED');
+    }
+  });
+
+  // Get personalized salon recommendations for user
+  getPersonalizedRecommendations = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const {
+      latitude,
+      lat,
+      longitude,
+      lng,
+      limit = 20
+    } = req.query;
+
+    const userLat = parseFloat(latitude || lat);
+    const userLng = parseFloat(longitude || lng);
+
+    try {
+      const recommendationService = require('../services/recommendationService');
+
+      let recommendations;
+      if (userLat && userLng) {
+        // Get nearby personalized recommendations
+        const radius = parseFloat(req.query.radius) || 50; // Default 50km radius
+        recommendations = await recommendationService.getNearbyRecommendations(
+          userId,
+          userLat,
+          userLng,
+          radius,
+          parseInt(limit)
+        );
+      } else {
+        // Get general personalized recommendations
+        recommendations = await recommendationService.getRecommendations(
+          userId,
+          parseInt(limit)
+        );
+      }
+
+      // If no personalized recommendations, fall back to popular salons
+      if (!recommendations || recommendations.length === 0) {
+        const analyticsService = require('../services/analyticsService');
+        recommendations = await analyticsService.getPopularSalons(
+          4.0, // Lower threshold for fallback
+          5,   // Minimum reviews
+          parseInt(limit),
+          userLat || null,
+          userLng || null,
+          50   // 50km radius
+        );
+      }
+
+      res.status(200).json({
+        success: true,
+        data: recommendations,
+        personalized: recommendations.length > 0
+      });
+    } catch (error) {
+      // If recommendations fail, fall back to popular salons
+      console.error('Error getting personalized recommendations:', error);
+      try {
+        const analyticsService = require('../services/analyticsService');
+        const fallbackSalons = await analyticsService.getPopularSalons(
+          4.0,
+          5,
+          parseInt(limit),
+          userLat || null,
+          userLng || null,
+          50
+        );
+        res.status(200).json({
+          success: true,
+          data: fallbackSalons,
+          personalized: false
+        });
+      } catch (fallbackError) {
+        throw new AppError('Failed to get salon recommendations', 500, 'RECOMMENDATIONS_FAILED');
+      }
     }
   });
 }
