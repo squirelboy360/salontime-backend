@@ -25,7 +25,9 @@ class AuthController {
     const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?user_type=${user_type}`;
 
     try {
+      console.log(`🔗 Generating OAuth URL for provider: ${provider}, user_type: ${user_type}`);
       const oauthUrl = await supabaseService.generateOAuthUrl(provider, redirectUrl);
+      console.log(`✅ OAuth URL generated successfully for ${provider}`);
 
       res.status(200).json({
         success: true,
@@ -36,7 +38,11 @@ class AuthController {
         }
       });
     } catch (error) {
-      throw new AppError(`Failed to generate ${provider} OAuth URL`, 500, 'OAUTH_GENERATION_FAILED');
+      console.error(`❌ Error generating OAuth URL for ${provider}:`, error);
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError(`Failed to generate ${provider} OAuth URL: ${error.message}`, 500, 'OAUTH_GENERATION_FAILED');
     }
   });
 

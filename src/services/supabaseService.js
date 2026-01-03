@@ -240,22 +240,46 @@ class SupabaseService {
 
   // OAuth URL generation
   async generateOAuthUrl(provider, redirectUrl) {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: provider,
-      options: {
+    try {
+      console.log(`🔗 Generating OAuth URL for provider: ${provider}, redirectUrl: ${redirectUrl}`);
+      
+      // Apple doesn't support access_type and prompt parameters
+      const options = {
         redirectTo: redirectUrl,
-        queryParams: {
+      };
+      
+      // Only add Google-specific parameters for Google provider
+      if (provider === 'google') {
+        options.queryParams = {
           access_type: 'offline',
           prompt: 'consent',
-        }
+        };
       }
-    });
+      
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: provider,
+        options: options
+      });
 
-    if (error) {
-      throw new AppError(`Failed to generate ${provider} OAuth URL`, 500, 'OAUTH_ERROR');
+      if (error) {
+        console.error(`❌ Supabase OAuth error for ${provider}:`, error);
+        throw new AppError(`Failed to generate ${provider} OAuth URL: ${error.message}`, 500, 'OAUTH_ERROR');
+      }
+
+      if (!data || !data.url) {
+        console.error(`❌ No OAuth URL returned for ${provider}`);
+        throw new AppError(`Failed to generate ${provider} OAuth URL: No URL returned`, 500, 'OAUTH_ERROR');
+      }
+
+      console.log(`✅ Generated OAuth URL for ${provider}`);
+      return data.url;
+    } catch (err) {
+      console.error(`❌ Exception generating OAuth URL for ${provider}:`, err);
+      if (err instanceof AppError) {
+        throw err;
+      }
+      throw new AppError(`Failed to generate ${provider} OAuth URL: ${err.message}`, 500, 'OAUTH_ERROR');
     }
-
-    return data.url;
   }
 
   // Session management
