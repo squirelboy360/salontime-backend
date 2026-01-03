@@ -4,6 +4,8 @@ const { asyncHandler, AppError } = require('../middleware/errorHandler');
 // Get user's favorite salons
 const getFavorites = asyncHandler(async (req, res) => {
   try {
+    console.log('🔍 Fetching favorites for user:', req.user.id);
+    
     const { data: favorites, error } = await supabaseAdmin
       .from('user_favorites')
       .select(`
@@ -41,34 +43,63 @@ const getFavorites = asyncHandler(async (req, res) => {
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('Supabase error fetching favorites:', error);
+      console.error('❌ Supabase error fetching favorites:', error);
       throw new AppError(`Failed to fetch favorites: ${error.message}`, 500, 'FAVORITES_FETCH_FAILED');
     }
 
-    // Add coordinates to favorite salons
-    const { geocodeSalons } = require('../utils/geocoding');
-    const favoritesWithCoords = (favorites || []).map(fav => {
-      if (fav.salons) {
-        const salonArray = Array.isArray(fav.salons) ? fav.salons : [fav.salons];
-        const geocodedSalons = geocodeSalons(salonArray);
-        return {
-          ...fav,
-          salons: geocodedSalons[0] || fav.salons
-        };
-      }
-      return fav;
-    });
+    console.log(`✅ Found ${(favorites || []).length} favorites`);
 
-    res.status(200).json({
-      success: true,
-      data: favoritesWithCoords
-    });
+    // Handle empty favorites
+    if (!favorites || favorites.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: []
+      });
+    }
+
+    // Add coordinates to favorite salons (safely handle null/undefined)
+    try {
+      const { geocodeSalons } = require('../utils/geocoding');
+      const favoritesWithCoords = favorites.map(fav => {
+        try {
+          if (fav.salons) {
+            const salonArray = Array.isArray(fav.salons) ? fav.salons : [fav.salons];
+            // Filter out null/undefined salons
+            const validSalons = salonArray.filter(s => s != null);
+            if (validSalons.length > 0) {
+              const geocodedSalons = geocodeSalons(validSalons);
+              return {
+                ...fav,
+                salons: geocodedSalons[0] || validSalons[0] || fav.salons
+              };
+            }
+          }
+          return fav;
+        } catch (mapError) {
+          console.error('⚠️ Error processing favorite:', mapError);
+          // Return favorite without geocoding if there's an error
+          return fav;
+        }
+      });
+
+      res.status(200).json({
+        success: true,
+        data: favoritesWithCoords
+      });
+    } catch (geocodeError) {
+      console.error('⚠️ Error geocoding favorites, returning without geocoding:', geocodeError);
+      // Return favorites without geocoding if geocoding fails
+      res.status(200).json({
+        success: true,
+        data: favorites
+      });
+    }
   } catch (error) {
-    console.error('Error in getFavorites:', error);
+    console.error('❌ Error in getFavorites:', error);
     if (error instanceof AppError) {
       throw error;
     }
-    throw new AppError('Failed to fetch favorites', 500, 'FAVORITES_FETCH_FAILED');
+    throw new AppError(`Failed to fetch favorites: ${error.message}`, 500, 'FAVORITES_FETCH_FAILED');
   }
 });
 

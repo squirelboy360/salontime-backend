@@ -328,27 +328,37 @@ class SupabaseService {
   }
 
   async updateUserSettings(userId, updates) {
-    const { data, error } = await supabase
-      .from('user_settings')
-      .update({
-        ...updates,
-        updated_at: new Date().toISOString()
-      })
-      .eq('user_id', userId)
-      .select()
-      .single();
+    try {
+      console.log(`🔧 Updating user settings for userId: ${userId}`, updates);
+      
+      const { data, error } = await supabase
+        .from('user_settings')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', userId)
+        .select()
+        .single();
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        // Settings don't exist, create them first
-        await this.createUserSettings(userId);
-        // Try update again
-        return await this.updateUserSettings(userId, updates);
+      if (error) {
+        console.error('❌ Error updating user settings:', error);
+        if (error.code === 'PGRST116') {
+          // Settings don't exist, create them first
+          console.log('📝 Creating default settings for user...');
+          await this.createUserSettings(userId);
+          // Try update again
+          return await this.updateUserSettings(userId, updates);
+        }
+        throw new AppError(`Failed to update user settings: ${error.message}`, 500, 'DATABASE_ERROR');
       }
-      throw new AppError('Failed to update user settings', 500, 'DATABASE_ERROR');
-    }
 
-    return data;
+      console.log('✅ User settings updated successfully');
+      return data;
+    } catch (err) {
+      console.error('❌ Exception in updateUserSettings:', err);
+      throw err;
+    }
   }
 
   // Track user interactions for personalization
