@@ -332,13 +332,29 @@ class SalonController {
       limit = 50
     } = req.query;
 
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    // Validate and parse pagination parameters
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 50;
+    const validLimit = Math.min(Math.max(limitNum, 1), 100); // Clamp between 1 and 100
+    const offset = (Math.max(pageNum, 1) - 1) * validLimit;
+    
     const searchQuery = q || search;
-    const userLat = parseFloat(latitude || lat);
-    const userLng = parseFloat(longitude || lng);
-    const minRatingFilter = parseFloat(min_rating || minRating || 0);
-    const maxDistanceFilter = parseFloat(max_distance || maxDistance || 1000);
-    const minDistanceFilter = parseFloat(min_distance || minDistance || 0);
+    
+    // Parse and validate numeric values, defaulting to null/0 if invalid
+    const userLatRaw = parseFloat(latitude || lat);
+    const userLngRaw = parseFloat(longitude || lng);
+    const userLat = !isNaN(userLatRaw) && isFinite(userLatRaw) ? userLatRaw : null;
+    const userLng = !isNaN(userLngRaw) && isFinite(userLngRaw) ? userLngRaw : null;
+    
+    const minRatingFilterRaw = parseFloat(min_rating || minRating || 0);
+    const minRatingFilter = !isNaN(minRatingFilterRaw) && isFinite(minRatingFilterRaw) && minRatingFilterRaw > 0 ? minRatingFilterRaw : 0;
+    
+    const maxDistanceFilterRaw = parseFloat(max_distance || maxDistance || 1000);
+    const maxDistanceFilter = !isNaN(maxDistanceFilterRaw) && isFinite(maxDistanceFilterRaw) && maxDistanceFilterRaw > 0 ? maxDistanceFilterRaw : 1000;
+    
+    const minDistanceFilterRaw = parseFloat(min_distance || minDistance || 0);
+    const minDistanceFilter = !isNaN(minDistanceFilterRaw) && isFinite(minDistanceFilterRaw) && minDistanceFilterRaw >= 0 ? minDistanceFilterRaw : 0;
+    
     const sortByValue = sort || sortBy || 'distance';
 
     // Helper function to calculate distance (for sorting/final distance calculation)
@@ -374,10 +390,13 @@ class SalonController {
         .eq('is_active', true);
 
       // Text search - use OR for multiple fields at DB level
+      // Supabase or() syntax: field.operator.value,field2.operator.value2
+      // For ilike with wildcards, use % for pattern matching
       if (searchQuery) {
-        const searchLower = searchQuery.toLowerCase();
+        const searchPattern = `%${searchQuery}%`;
         // Use Supabase's or() to search across multiple fields
-        query = query.or(`business_name.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%,city.ilike.%${searchQuery}%`);
+        // Format: field.ilike.%pattern%,field2.ilike.%pattern%
+        query = query.or(`business_name.ilike.${searchPattern},description.ilike.${searchPattern},city.ilike.${searchPattern}`);
       }
 
       // Location/City filter
@@ -394,6 +413,7 @@ class SalonController {
       // Featured filter
       if (featured === 'true' || featured === true) {
         const now = new Date().toISOString();
+        // Use proper Supabase or() syntax for date comparison
         query = query.eq('is_featured', true)
           .or(`featured_until.is.null,featured_until.gte.${now}`);
       }
@@ -418,7 +438,7 @@ class SalonController {
 
       // Distance filtering using bounding box (DB level)
       // This is an approximation but much faster than fetching all salons
-      if (userLat && userLng && (maxDistanceFilter < 1000 || minDistanceFilter > 0)) {
+      if (userLat !== null && userLng !== null && !isNaN(userLat) && !isNaN(userLng) && (maxDistanceFilter < 1000 || minDistanceFilter > 0)) {
         const box = getBoundingBox(userLat, userLng, maxDistanceFilter);
         query = query
           .gte('latitude', box.minLat)
@@ -470,8 +490,10 @@ class SalonController {
       }
 
       // Price filtering - fetch services first, then filter salons
-      const minPriceFilter = parseFloat(req.query.min_price || req.query.minPrice || 0);
-      const maxPriceFilter = parseFloat(req.query.max_price || req.query.maxPrice || 10000);
+      const minPriceFilterRaw = parseFloat(req.query.min_price || req.query.minPrice || 0);
+      const maxPriceFilterRaw = parseFloat(req.query.max_price || req.query.maxPrice || 10000);
+      const minPriceFilter = !isNaN(minPriceFilterRaw) && minPriceFilterRaw >= 0 ? minPriceFilterRaw : 0;
+      const maxPriceFilter = !isNaN(maxPriceFilterRaw) && maxPriceFilterRaw > 0 ? maxPriceFilterRaw : 10000;
       
       let priceFilteredSalonIds = null;
       if (minPriceFilter > 0 || maxPriceFilter < 10000) {
@@ -545,7 +567,7 @@ class SalonController {
           break;
         case 'distance':
         default:
-          if (userLat && userLng) {
+          if (userLat !== null && userLng !== null && !isNaN(userLat) && !isNaN(userLng)) {
             // Will sort by distance after fetching
             query = query.order('rating_average', { ascending: false });
           } else {
@@ -557,7 +579,7 @@ class SalonController {
       // Apply limit and offset at DB level
       // Note: We fetch more than needed to account for post-filtering (distance, open_now)
       // This ensures we have enough results after final filtering
-      const fetchLimit = Math.max(parseInt(limit) * 3, 150); // Fetch 3x the limit or min 150
+      const fetchLimit = Math.max(validLimit * 3, 150); // Fetch 3x the limit or min 150
       query = query.limit(fetchLimit);
 
       const { data: salons, error } = await query;
@@ -568,14 +590,21 @@ class SalonController {
       }
 
       // Add coordinates if missing (geocoding)
-      const { geocodeSalons } = require('../utils/geocoding');
-      let salonsWithCoords = geocodeSalons(salons || []);
+      let salonsWithCoords = salons || [];
+      try {
+        const { geocodeSalons } = require('../utils/geocoding');
+        salonsWithCoords = geocodeSalons(salons || []);
+      } catch (geocodeError) {
+        console.warn('⚠️ Geocoding error (non-fatal):', geocodeError.message);
+        // Continue with salons as-is if geocoding fails
+        salonsWithCoords = salons || [];
+      }
 
       // Calculate exact distances and apply final distance filter (for accuracy)
       let filteredSalons = salonsWithCoords;
-      if (userLat && userLng) {
+      if (userLat !== null && userLng !== null && !isNaN(userLat) && !isNaN(userLng)) {
         filteredSalons = salonsWithCoords.map(salon => {
-          if (salon.latitude && salon.longitude) {
+          if (salon.latitude && salon.longitude && !isNaN(salon.latitude) && !isNaN(salon.longitude)) {
             const distance = calculateDistance(userLat, userLng, salon.latitude, salon.longitude);
             return { ...salon, distance };
           }
@@ -585,14 +614,18 @@ class SalonController {
         // Apply exact distance filter (refinement after bounding box)
         if (maxDistanceFilter < 1000 || minDistanceFilter > 0) {
           filteredSalons = filteredSalons.filter(salon => {
-            if (!salon.distance) return false; // Exclude salons without coordinates
+            if (!salon.distance || isNaN(salon.distance)) return false; // Exclude salons without valid coordinates
             return salon.distance >= minDistanceFilter && salon.distance <= maxDistanceFilter;
           });
         }
 
         // Sort by distance if requested
         if (sortByValue.toLowerCase() === 'distance') {
-          filteredSalons.sort((a, b) => (a.distance || 9999) - (b.distance || 9999));
+          filteredSalons.sort((a, b) => {
+            const distA = a.distance && !isNaN(a.distance) ? a.distance : 9999;
+            const distB = b.distance && !isNaN(b.distance) ? b.distance : 9999;
+            return distA - distB;
+          });
         }
       }
 
@@ -614,19 +647,19 @@ class SalonController {
       }
 
       // Apply pagination after all filtering
-      const paginatedSalons = filteredSalons.slice(offset, offset + parseInt(limit));
+      const paginatedSalons = filteredSalons.slice(offset, offset + validLimit);
       const total = filteredSalons.length;
-      const hasMore = (offset + parseInt(limit)) < filteredSalons.length;
+      const hasMore = (offset + validLimit) < filteredSalons.length;
 
       console.log(`✅ Found ${filteredSalons.length} salons with DB-level filters`);
-      console.log(`📄 Returning ${paginatedSalons.length} salons for page ${page} (total: ${total}, hasMore: ${hasMore})`);
+      console.log(`📄 Returning ${paginatedSalons.length} salons for page ${pageNum} (total: ${total}, hasMore: ${hasMore})`);
 
       res.status(200).json({
         success: true,
         data: paginatedSalons,
         pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
+          page: pageNum,
+          limit: validLimit,
           total: total,
           hasMore: hasMore
         }
