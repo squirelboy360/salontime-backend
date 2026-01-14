@@ -392,10 +392,18 @@ class SalonController {
       // Text search - use OR for multiple fields at DB level
       // Supabase or() syntax: field.operator.value,field2.operator.value2
       // For ilike with wildcards, use % for pattern matching
-      if (searchQuery) {
-        const searchPattern = `%${searchQuery}%`;
+      if (searchQuery && searchQuery.trim().length > 0) {
+        // Escape special characters that could break the query (%, _ are SQL wildcards)
+        const escapedQuery = String(searchQuery)
+          .replace(/\\/g, '\\\\')  // Escape backslashes first
+          .replace(/%/g, '\\%')    // Escape %
+          .replace(/_/g, '\\_');   // Escape _
+        
+        const searchPattern = `%${escapedQuery}%`;
+        
         // Use Supabase's or() to search across multiple fields
         // Format: field.ilike.%pattern%,field2.ilike.%pattern%
+        // Supabase PostgREST expects the pattern in the format: field.ilike.%value%
         query = query.or(`business_name.ilike.${searchPattern},description.ilike.${searchPattern},city.ilike.${searchPattern}`);
       }
 
@@ -586,7 +594,21 @@ class SalonController {
 
       if (error) {
         console.error('❌ Database query error:', error);
-        throw new AppError('Failed to search salons', 500, 'SALON_SEARCH_FAILED');
+        console.error('❌ Error details:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+          searchQuery: searchQuery,
+          filters: {
+            minRating: minRatingFilter,
+            maxDistance: maxDistanceFilter,
+            sort: sortByValue,
+            userLat,
+            userLng
+          }
+        });
+        throw new AppError(`Failed to search salons: ${error.message}`, 500, 'SALON_SEARCH_FAILED');
       }
 
       // Add coordinates if missing (geocoding)
