@@ -42,9 +42,15 @@ class AIController {
       contextInfo.push(`Favorite salons: ${userContext.favoriteSalons.length} salon(s)`);
     }
 
-    return `You are a helpful AI assistant for SalonTime, a salon booking platform. Your role is to help users find salons, book appointments, and answer questions about salon services.
+    return `You are an intelligent, proactive AI assistant for SalonTime, a salon booking platform. Think and act like a helpful human assistant would - be proactive, understand context, and take action to help users.
 
-${contextInfo.length > 0 ? `User Context:\n${contextInfo.join('\n')}\n` : ''}
+Your personality:
+- Proactive: When users ask questions, you naturally fetch the information they need without being asked explicitly
+- Context-aware: You understand conversation history and user intent from natural language
+- Helpful: You anticipate what users might need and provide complete, actionable information
+- Intelligent: You use the available tools (function calling) naturally when you need data to answer questions
+
+${contextInfo.length > 0 ? `Current User Context:\n${contextInfo.join('\n')}\n` : ''}
 
 IMPORTANT SECURITY: All API requests you make MUST be scoped to the current logged-in user (userId: ${userContext.userId || 'current_user'}). You CANNOT access data from other users. All requests are automatically authenticated with the user's token.
 
@@ -93,30 +99,45 @@ ANALYTICS:
 - GET /api/analytics/salons/new - Get new salons
 - GET /api/analytics/salons/featured - Get featured salons
 
-CRITICAL WORKFLOW - YOU MUST FOLLOW THIS EXACTLY:
+HOW TO BE A PROACTIVE ASSISTANT:
 
-When a user asks for ANY data (bookings, salons, favorites, reviews, etc.):
-1. IMMEDIATELY use make_api_request function to fetch the data - DO NOT just acknowledge
-2. After receiving data in the function response, you MUST:
-   a. Look at the actual data structure returned (it will be in response.data)
-   b. Generate GenUI JSON that uses the REAL data values from the response
-   c. Include GenUI JSON in your response (either in text as JSON code block or in metadata)
-   d. Provide a brief text summary
-3. NEVER say "no bookings" or "no data" without checking the function response data first
-4. ALWAYS use the actual data values from the API response, not placeholders
+Think like a human assistant: When someone asks you a question, you naturally:
+1. Understand what information they need
+2. Go get that information (using make_api_request function)
+3. Present it in a helpful, visual way (using GenUI)
+4. Provide context and next steps
+
+Examples of natural understanding:
+- "show me salons" → You understand they want to see nearby salons → Fetch /api/salons/nearby
+- "what are my bookings?" → You understand they want their appointment list → Fetch /api/bookings
+- "best salon for haircut" → You understand they want recommendations → Fetch /api/salons/nearby and filter/sort
+- "sure" (after asking about salons) → You understand they're confirming → Continue with the salon search
+
+When users ask questions that require data:
+1. Naturally use make_api_request to fetch the information - this is like looking something up for them
+2. After getting the data, create a visual display using GenUI with the actual data from the response
+3. Provide a helpful summary and next steps
+4. Never guess or assume - always fetch real data first
+
+Key principle: If you don't have the information to answer a question, you naturally go get it using the available tools. You don't say "I can help" - you just help.
 
 MANDATORY EXAMPLES:
 
 User: "laat mij alle boekingen zien" or "show me my bookings"
 YOU MUST:
 1. Call: make_api_request(method: "GET", endpoint: "/api/bookings")
+   IMPORTANT: If the response shows pagination (hasMore: true or total > returned count), 
+   you MUST make additional requests to get ALL bookings, not just the first page.
+   Continue fetching until you have all bookings.
 2. Wait for the function response - it will contain the actual booking data
 3. Look at response.data - it will be an array of bookings with fields like:
    - salon.business_name or salon_name
+   - salon.image_url or salon.images[0] for images
    - service.name or service_name
    - appointment_date
    - start_time, end_time
    - status
+4. Include ALL bookings in the GenUI List, not just the first few
 4. Generate GenUI using the ACTUAL values from the data. ALWAYS include images when available. Use this structure:
    genui: { 
      command: "beginRendering", 
@@ -148,11 +169,19 @@ YOU MUST:
 6. Replace "actual_..." placeholders with REAL values from the function response data
 7. Text response: "Hier zijn je boekingen:" followed by the GenUI JSON
 
-User: "find salons near me" or "vind salons bij mij"
-YOU MUST:
-1. Call: make_api_request(method: "GET", endpoint: "/api/salons/nearby?lat=[lat]&lng=[lng]")
-2. Generate GenUI List with salon cards
-3. Include GenUI in metadata
+       User: "find salons near me" or "vind salons bij mij" or "show me the best salon" or "can u show me based on my location the best salon"
+       YOU MUST:
+       1. IMMEDIATELY call: make_api_request(method: "GET", endpoint: "/api/salons/nearby", queryParams: {lat: [user_lat], lng: [user_lng], max_distance: "50"})
+       2. Wait for the function response - it will contain the actual salon data
+       3. Look at response.data.data - it will be an array of salons with fields like:
+          - business_name
+          - address, city
+          - rating_average
+          - image_url
+          - id
+       4. Generate GenUI using the ACTUAL values from the data. ALWAYS include images when available.
+       5. Include GenUI JSON in response metadata
+       6. NEVER say "I couldn't find any salons" without first calling the API
 
 User: "book an appointment" or "boek een afspraak"
 YOU MUST:
@@ -197,22 +226,21 @@ Example Card with image (MANDATORY FORMAT):
 
 If image_url is null or empty, you can skip the Image component, but ALWAYS check for it first.
 
-ABSOLUTE RULES:
-- NEVER respond with "I can help" or "How can I help" when user asks for specific data
-- ALWAYS use make_api_request FIRST when data is requested
-- ALWAYS generate GenUI after fetching data
-- ALWAYS include GenUI JSON in response metadata
-- If you don't fetch data, you are FAILING the user's request
+CORE PRINCIPLES:
+- Be proactive: When users ask questions, naturally fetch the information they need
+- Be helpful: Present information visually using GenUI so users can see and interact with data
+- Be intelligent: Understand context from conversation history and user intent
+- Be accurate: Always use real data from API responses, never make assumptions
+- Be natural: Respond like a helpful human assistant would - take action, don't just acknowledge
 
 Guidelines:
-- Be friendly, professional, and helpful
-- ALWAYS fetch real data via API - never assume or guess
-- ALWAYS generate GenUI after fetching data
-- Provide recommendations based on user preferences and history
-- Keep responses concise and actionable
+- When users ask about data (bookings, salons, etc.), naturally use make_api_request to get it
+- After fetching data, create visual displays using GenUI with the actual data
+- Understand follow-up questions in context (e.g., "sure" after asking about salons means continue)
+- Use the user's location when available for location-based queries
 - ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in English'}
 
-Remember: When user asks for data, you MUST use function calling to get it, then use GenUI to display it. No exceptions.`;
+Remember: You're an intelligent assistant. When someone asks you something, you naturally go get the information they need and present it helpfully.`;
   }
 
   // Make authenticated API request on behalf of user
@@ -282,7 +310,7 @@ Remember: When user asks for data, you MUST use function calling to get it, then
         functionDeclarations: [
           {
             name: 'make_api_request',
-            description: 'Make an authenticated API request on behalf of the current user. All requests are automatically scoped to the logged-in user. Use this to fetch user data like bookings, salons, services, favorites, etc.',
+            description: `Use this function whenever you need to fetch information to answer a user's question. This is your way of "looking things up" - use it naturally whenever you need data. Examples: when users ask about their bookings, want to see salons, need service information, want to check favorites, etc. The user's location is available: ${userContext.location ? `lat=${userContext.location.latitude}, lng=${userContext.location.longitude}` : 'not provided'}. All requests are automatically authenticated and scoped to the current user.`,
             parameters: {
               type: 'OBJECT',
               properties: {
@@ -533,14 +561,20 @@ Remember: When user asks for data, you MUST use function calling to get it, then
     }
 
     // Get conversation history (last N messages for context)
+    // IMPORTANT: Load history AFTER saving user message so it includes the current message
     const { data: historyMessages, error: historyError } = await authenticatedClient
       .from('ai_messages')
-      .select('role, content')
+      .select('role, content, created_at')
       .eq('conversation_id', currentConversationId)
       .order('created_at', { ascending: true })
       .limit(config.ai.max_conversation_history);
 
-      // Fetch conversation history (errors are non-critical)
+    // Log history for debugging
+    if (historyMessages && historyMessages.length > 0) {
+      console.log(`📚 Loaded ${historyMessages.length} messages from history for conversation ${currentConversationId}`);
+    } else {
+      console.log(`⚠️ No history found for conversation ${currentConversationId}`);
+    }
 
     // Get user context with location
     const userContext = await this.getUserContext(userId, req.token, latitude, longitude);
@@ -549,9 +583,15 @@ Remember: When user asks for data, you MUST use function calling to get it, then
     const chatHistory = [];
     const systemPrompt = this.getSystemPrompt(userContext);
 
-    // Add conversation history
+    // Add conversation history - EXCLUDE the current user message since we'll send it separately
+    // The current user message is already saved, so we need to exclude it from history
+    // and send it as the current message to Gemini
     if (historyMessages && historyMessages.length > 0) {
-      historyMessages.forEach(msg => {
+      // Filter out the most recent user message (the one we just saved)
+      // We'll send it as the current message instead of including it in history
+      const messagesToInclude = historyMessages.slice(0, -1); // Exclude last message (current user message)
+      
+      messagesToInclude.forEach(msg => {
         if (msg.role === 'user' || msg.role === 'assistant') {
           chatHistory.push({
             role: msg.role === 'user' ? 'user' : 'model',
@@ -559,6 +599,8 @@ Remember: When user asks for data, you MUST use function calling to get it, then
           });
         }
       });
+      
+      console.log(`📝 Added ${messagesToInclude.length} messages to chat history (excluded current user message)`);
     }
 
     try {
@@ -610,11 +652,32 @@ Remember: When user asks for data, you MUST use function calling to get it, then
       const isBookingRequest = messageLower.includes('boeking') || messageLower.includes('booking') || 
                                messageLower.includes('afspraak') || messageLower.includes('appointment') ||
                                ((messageLower === 'ja' || messageLower === 'yes') && hasRecentBookingContext);
-      const isSalonRequest = messageLower.includes('salon') || messageLower.includes('kapper') || 
-                             messageLower.includes('hairdresser');
+      // Enhanced detection for salon requests - check for more keywords and patterns
+      const isSalonRequest = messageLower.includes('salon') || 
+                             messageLower.includes('kapper') || 
+                             messageLower.includes('hairdresser') ||
+                             messageLower.includes('hair cut') ||
+                             messageLower.includes('haircut') ||
+                             messageLower.includes('best salon') ||
+                             messageLower.includes('nearby salon') ||
+                             messageLower.includes('salon near') ||
+                             messageLower.includes('find salon') ||
+                             messageLower.includes('search salon') ||
+                             (messageLower.includes('show me') && (messageLower.includes('salon') || messageLower.includes('hair'))) ||
+                             (messageLower.includes('location') && (messageLower.includes('salon') || messageLower.includes('hair'))) ||
+                             (messageLower.includes('based on') && (messageLower.includes('location') || messageLower.includes('my location')) && (messageLower.includes('salon') || messageLower.includes('hair'))) ||
+                             (messageLower.includes('get my hair') && messageLower.includes('cut'));
       const isFavoriteRequest = messageLower.includes('favoriet') || messageLower.includes('favorite');
       
-      // Send message and handle function calls
+      // Debug logging
+      if (isSalonRequest) {
+        console.log(`🔍 Detected salon request in message: "${message.substring(0, 100)}"`);
+        console.log(`📍 Location available: lat=${latitude}, lng=${longitude}`);
+      }
+      
+      // Send the current user message to Gemini
+      // Note: The current user message is NOT in chatHistory, we send it now
+      console.log(`💬 Sending current message to Gemini: "${message.substring(0, 50)}..."`);
       let result = await chat.sendMessage(message.trim());
       let response = result.response;
       
@@ -623,43 +686,64 @@ Remember: When user asks for data, you MUST use function calling to get it, then
       let functionCallCount = 0;
       const maxFunctionCallIterations = 5; // Prevent infinite loops
       
-      // If user asked for bookings but AI didn't make a function call, force it
-      if (isBookingRequest && (!currentFunctionCalls || currentFunctionCalls.length === 0)) {
-        // Force a function call to get bookings
-        currentFunctionCalls = [{
-          name: 'make_api_request',
-          args: {
-            method: 'GET',
-            endpoint: '/api/bookings'
-          }
-        }];
-      }
+      // Fallback: Only force function calls if AI didn't make any AND the response suggests it should have
+      // This is a safety net, but the AI should naturally use function calling based on the improved prompt
+      const responseText = (response.text && typeof response.text === 'function') ? response.text() : (response.text || '');
+      const responseLower = responseText.toLowerCase();
+      const seemsLikeDataRequest = responseLower.includes("couldn't find") || 
+                                   responseLower.includes("don't have") ||
+                                   responseLower.includes("i can help") ||
+                                   responseLower.includes("how can i help");
       
-      // If user asked for salons but AI didn't make a function call, force it
-      if (isSalonRequest && (!currentFunctionCalls || currentFunctionCalls.length === 0) && latitude && longitude) {
-        currentFunctionCalls = [{
-          name: 'make_api_request',
-          args: {
-            method: 'GET',
-            endpoint: '/api/salons/nearby',
-            queryParams: {
-              lat: latitude.toString(),
-              lng: longitude.toString(),
-              max_distance: '50'
+      // Only force if AI didn't make a function call AND the response suggests it should have fetched data
+      if ((!currentFunctionCalls || currentFunctionCalls.length === 0) && seemsLikeDataRequest) {
+        if (isBookingRequest) {
+          console.log(`⚠️ AI didn't fetch bookings but should have - forcing as fallback`);
+          currentFunctionCalls = [{
+            name: 'make_api_request',
+            args: {
+              method: 'GET',
+              endpoint: '/api/bookings'
             }
+          }];
+        } else if (isSalonRequest) {
+          if (latitude && longitude) {
+            console.log(`⚠️ AI didn't fetch salons but should have - forcing as fallback with location: lat=${latitude}, lng=${longitude}`);
+            currentFunctionCalls = [{
+              name: 'make_api_request',
+              args: {
+                method: 'GET',
+                endpoint: '/api/salons/nearby',
+                queryParams: {
+                  lat: latitude.toString(),
+                  lng: longitude.toString(),
+                  max_distance: '50'
+                }
+              }
+            }];
+          } else {
+            console.log(`⚠️ AI didn't fetch salons but should have - forcing as fallback without location`);
+            currentFunctionCalls = [{
+              name: 'make_api_request',
+              args: {
+                method: 'GET',
+                endpoint: '/api/salons/search',
+                queryParams: {
+                  sort: 'rating'
+                }
+              }
+            }];
           }
-        }];
-      }
-      
-      // If user asked for favorites but AI didn't make a function call, force it
-      if (isFavoriteRequest && (!currentFunctionCalls || currentFunctionCalls.length === 0)) {
-        currentFunctionCalls = [{
-          name: 'make_api_request',
-          args: {
-            method: 'GET',
-            endpoint: '/api/favorites'
-          }
-        }];
+        } else if (isFavoriteRequest) {
+          console.log(`⚠️ AI didn't fetch favorites but should have - forcing as fallback`);
+          currentFunctionCalls = [{
+            name: 'make_api_request',
+            args: {
+              method: 'GET',
+              endpoint: '/api/favorites'
+            }
+          }];
+        }
       }
       
       while (currentFunctionCalls && currentFunctionCalls.length > 0 && functionCallCount < maxFunctionCallIterations) {
