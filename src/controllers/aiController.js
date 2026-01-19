@@ -2,6 +2,9 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const supabaseService = require('../services/supabaseService');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const config = require('../config');
+const http = require('http');
+const https = require('https');
+const { URL } = require('url');
 
 class AIController {
   constructor() {
@@ -39,17 +42,140 @@ class AIController {
 
 ${contextInfo.length > 0 ? `User Context:\n${contextInfo.join('\n')}\n` : ''}
 
+IMPORTANT SECURITY: All API requests you make MUST be scoped to the current logged-in user (userId: ${userContext.userId || 'current_user'}). You CANNOT access data from other users. All requests are automatically authenticated with the user's token.
+
+Available API Endpoints (all require authentication, automatically scoped to current user):
+- GET /api/bookings - Get user's bookings (automatically filtered to current user)
+- GET /api/salons - Search/browse salons (public, but can filter by user preferences)
+- GET /api/services?salon_id={id} - Get services for a salon
+- GET /api/favorites - Get user's favorite salons (automatically filtered to current user)
+- POST /api/bookings - Create a booking (automatically scoped to current user)
+- GET /api/user/profile - Get current user's profile
+
+When you need to make API calls:
+1. Use the "make_api_request" function tool to call these endpoints
+2. The request will automatically include the user's authentication token
+3. All responses are automatically scoped to the current user (userId: ${userContext.userId || 'current_user'})
+4. If a request fails or returns no data, explain this to the user
+5. After getting API data, present it in a helpful, readable format
+
+When you cannot fulfill a request via API or when the user asks for dynamic UI:
+- Use GenUI (A2UI) format to generate dynamic Flutter UI components
+- You can generate: Text, Markdown, Image, Button, TextField, Card, List, etc.
+- Use the beginRendering command to create new UI surfaces
+- Use surfaceUpdate to update existing surfaces
+- Use dataModelUpdate to update the data model that widgets are bound to
+- Example: If user asks "show me my bookings in a list", first call the API to get bookings, then generate a List UI component with the data
+
 Guidelines:
 - Be friendly, professional, and helpful
 - Help users find salons based on their preferences (location, services, ratings, etc.)
-- Assist with booking appointments
-- Answer questions about salon services, pricing, and availability
+- When users ask about their bookings, use the API to fetch real data
+- When users want to see salon details, use the API to fetch real data
+- When you need to show complex data or forms, use GenUI to generate appropriate UI
 - Provide recommendations based on user preferences and history
 - If you don't know something, suggest the user check the app or contact support
 - Keep responses concise and actionable
 - ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in English'}
 
-Remember: You cannot actually make bookings or access real-time availability. Guide users to use the app's booking features for that.`;
+Remember: You have access to real user data through API calls. Use this to provide accurate, personalized assistance.`;
+  }
+
+  // Make authenticated API request on behalf of user
+  async makeApiRequest(userId, userToken, method, endpoint, body = null, queryParams = {}) {
+    try {
+      const baseUrl = config.server.api_base_url || 'http://localhost:3000';
+      const url = new URL(endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`);
+      
+      // Add query parameters
+      Object.keys(queryParams).forEach(key => {
+        if (queryParams[key] != null) {
+          url.searchParams.append(key, queryParams[key]);
+        }
+      });
+
+      const options = {
+        method: method.toUpperCase(),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${userToken}`,
+        },
+      };
+
+      return new Promise((resolve, reject) => {
+        const requestModule = url.protocol === 'https:' ? https : http;
+        const req = requestModule.request(url, options, (res) => {
+          let data = '';
+          res.on('data', (chunk) => { data += chunk; });
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(data);
+              resolve({
+                status: res.statusCode,
+                data: parsed,
+                success: res.statusCode >= 200 && res.statusCode < 300
+              });
+            } catch (e) {
+              resolve({
+                status: res.statusCode,
+                data: data,
+                success: res.statusCode >= 200 && res.statusCode < 300
+              });
+            }
+          });
+        });
+
+        req.on('error', (error) => {
+          reject(error);
+        });
+
+        if (body && (method.toUpperCase() === 'POST' || method.toUpperCase() === 'PUT' || method.toUpperCase() === 'PATCH')) {
+          req.write(JSON.stringify(body));
+        }
+
+        req.end();
+      });
+    } catch (error) {
+      console.error('API request error:', error);
+      throw error;
+    }
+  }
+
+  // Get function calling tools for Gemini
+  getFunctionCallingTools() {
+    return [
+      {
+        functionDeclarations: [
+          {
+            name: 'make_api_request',
+            description: 'Make an authenticated API request on behalf of the current user. All requests are automatically scoped to the logged-in user. Use this to fetch user data like bookings, salons, services, favorites, etc.',
+            parameters: {
+              type: 'OBJECT',
+              properties: {
+                method: {
+                  type: 'STRING',
+                  description: 'HTTP method: GET, POST, PUT, PATCH, or DELETE',
+                  enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+                },
+                endpoint: {
+                  type: 'STRING',
+                  description: 'API endpoint path (e.g., /api/bookings, /api/salons, /api/services?salon_id=xxx). Do not include the base URL.'
+                },
+                body: {
+                  type: 'OBJECT',
+                  description: 'Request body for POST/PUT/PATCH requests (optional)'
+                },
+                queryParams: {
+                  type: 'OBJECT',
+                  description: 'Query parameters as key-value pairs (optional)'
+                }
+              },
+              required: ['method', 'endpoint']
+            }
+          }
+        ]
+      }
+    ];
   }
 
   // Get user context for AI
@@ -98,6 +224,7 @@ Remember: You cannot actually make bookings or access real-time availability. Gu
       }
 
       return {
+        userId: userId,
         name: userProfile ? `${userProfile.first_name} ${userProfile.last_name}` : null,
         language: userProfile?.language || 'en',
         recentBookings: recentBookings || [],
@@ -308,6 +435,7 @@ Remember: You cannot actually make bookings or access real-time availability. Gu
     try {
       let chat;
       let aiResponse;
+      const userToken = req.token; // Get user's auth token
       
       // If this is the first message, include system prompt in history
       if (chatHistory.length === 0) {
@@ -327,6 +455,7 @@ Remember: You cannot actually make bookings or access real-time availability. Gu
             maxOutputTokens: config.ai.max_tokens,
             temperature: config.ai.temperature,
           },
+          tools: this.getFunctionCallingTools(),
         });
       } else {
         // Continue existing conversation (system prompt already in first message)
@@ -336,12 +465,64 @@ Remember: You cannot actually make bookings or access real-time availability. Gu
             maxOutputTokens: config.ai.max_tokens,
             temperature: config.ai.temperature,
           },
+          tools: this.getFunctionCallingTools(),
         });
       }
 
-      // Send message and get response
-      const result = await chat.sendMessage(message.trim());
-      const response = await result.response;
+      // Send message and handle function calls
+      let result = await chat.sendMessage(message.trim());
+      let response = result.response;
+      
+      // Handle function calls
+      while (response.functionCalls && response.functionCalls.length > 0) {
+        const functionCalls = response.functionCalls;
+        const functionResponses = [];
+
+        for (const functionCall of functionCalls) {
+          if (functionCall.name === 'make_api_request') {
+            try {
+              const { method, endpoint, body, queryParams } = functionCall.args;
+              console.log(`🤖 AI making API request: ${method} ${endpoint}`);
+              
+              const apiResponse = await this.makeApiRequest(
+                userId,
+                userToken,
+                method,
+                endpoint,
+                body,
+                queryParams || {}
+              );
+
+              functionResponses.push({
+                functionResponse: {
+                  name: 'make_api_request',
+                  response: {
+                    success: apiResponse.success,
+                    status: apiResponse.status,
+                    data: apiResponse.data
+                  }
+                }
+              });
+            } catch (error) {
+              console.error('Function call error:', error);
+              functionResponses.push({
+                functionResponse: {
+                  name: 'make_api_request',
+                  response: {
+                    success: false,
+                    error: error.message
+                  }
+                }
+              });
+            }
+          }
+        }
+
+        // Send function responses back to the model
+        result = await chat.sendMessage(functionResponses);
+        response = result.response;
+      }
+
       aiResponse = response.text();
 
       // Save AI response
