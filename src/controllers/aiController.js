@@ -792,6 +792,7 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
           (responseLower.includes("processed") && !responseLower.includes("genui"));
         
         // Check if user message suggests they want data - be more aggressive
+        // Include recommendation/advice requests, hair-related queries, etc.
         const userWantsData = 
           messageLower.includes('show') ||
           messageLower.includes('toon') ||
@@ -808,6 +809,21 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
           messageLower.includes('appointment') ||
           messageLower.includes('afspraak') ||
           messageLower.includes('salon') ||
+          messageLower.includes('kapper') ||
+          messageLower.includes('hair') ||
+          messageLower.includes('haar') ||
+          messageLower.includes('hairdresser') ||
+          messageLower.includes('advies') ||
+          messageLower.includes('advice') ||
+          messageLower.includes('recommend') ||
+          messageLower.includes('aanbevel') ||
+          messageLower.includes('best') ||
+          messageLower.includes('beste') ||
+          messageLower.includes('where') ||
+          messageLower.includes('waar') ||
+          messageLower.includes('heen') ||
+          messageLower.includes('go') ||
+          messageLower.includes('gaan') ||
           messageLower.includes('favorit') ||
           messageLower.includes('favorite');
         
@@ -828,7 +844,12 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
             }];
             console.log(`🔍 Forcing bookings fetch as fallback`);
           } else if (messageLower.includes('salon') || messageLower.includes('kapper') || 
-                     messageLower.includes('hair') || messageLower.includes('hairdresser')) {
+                     messageLower.includes('hair') || messageLower.includes('haar') ||
+                     messageLower.includes('hairdresser') || messageLower.includes('advies') ||
+                     messageLower.includes('advice') || messageLower.includes('recommend') ||
+                     messageLower.includes('aanbevel') || messageLower.includes('best') ||
+                     messageLower.includes('beste') || messageLower.includes('where') ||
+                     messageLower.includes('waar')) {
             if (latitude && longitude) {
               currentFunctionCalls = [{
                 name: 'make_api_request',
