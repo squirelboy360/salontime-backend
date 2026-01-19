@@ -710,7 +710,24 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
       let shouldForceFunctionCall = false;
       let forcedFunctionCall = null;
       
-      if (isSalonRequest && latitude && longitude) {
+      // Enhanced detection - check for more booking-related phrases
+      const bookingPhrases = ['booking', 'boeking', 'appointment', 'afspraak', 'reservation', 'reservering', 
+                              'my bookings', 'mijn boekingen', 'all bookings', 'alle boekingen',
+                              'list bookings', 'toon boekingen', 'show bookings', 'laat boekingen zien',
+                              'ever made', 'ooit gemaakt', 'previous', 'vorige', 'new and previous'];
+      const hasBookingPhrase = bookingPhrases.some(phrase => messageLower.includes(phrase));
+      
+      if (hasBookingPhrase || isBookingRequest) {
+        shouldForceFunctionCall = true;
+        forcedFunctionCall = {
+          name: 'make_api_request',
+          args: {
+            method: 'GET',
+            endpoint: '/api/bookings'
+          }
+        };
+        console.log(`🔍 Proactively forcing bookings fetch (detected: ${hasBookingPhrase ? 'phrase match' : 'keyword match'})`);
+      } else if (isSalonRequest && latitude && longitude) {
         shouldForceFunctionCall = true;
         forcedFunctionCall = {
           name: 'make_api_request',
@@ -725,16 +742,6 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
           }
         };
         console.log(`🔍 Proactively forcing salon search with location: lat=${latitude}, lng=${longitude}`);
-      } else if (isBookingRequest) {
-        shouldForceFunctionCall = true;
-        forcedFunctionCall = {
-          name: 'make_api_request',
-          args: {
-            method: 'GET',
-            endpoint: '/api/bookings'
-          }
-        };
-        console.log(`🔍 Proactively forcing bookings fetch`);
       } else if (isFavoriteRequest) {
         shouldForceFunctionCall = true;
         forcedFunctionCall = {
