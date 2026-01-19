@@ -394,17 +394,26 @@ class SalonController {
       // For ilike with wildcards, use % for pattern matching
       if (searchQuery && searchQuery.trim().length > 0) {
         // Escape special characters that could break the query (%, _ are SQL wildcards)
+        // We escape user input % and _ so they don't interfere with our wildcard pattern
         const escapedQuery = String(searchQuery)
           .replace(/\\/g, '\\\\')  // Escape backslashes first
-          .replace(/%/g, '\\%')    // Escape %
-          .replace(/_/g, '\\_');   // Escape _
+          .replace(/%/g, '\\%')    // Escape % in user input
+          .replace(/_/g, '\\_');   // Escape _ in user input
         
         const searchPattern = `%${escapedQuery}%`;
         
+        console.log('🔍 Search query:', searchQuery);
+        console.log('🔍 Escaped query:', escapedQuery);
+        console.log('🔍 Search pattern:', searchPattern);
+        
         // Use Supabase's or() to search across multiple fields
-        // Format: field.ilike.%pattern%,field2.ilike.%pattern%
-        // Supabase PostgREST expects the pattern in the format: field.ilike.%value%
+        // Format: field.ilike.value,field2.ilike.value2
+        // PostgREST expects the pattern without URL encoding for ilike
+        // The pattern is passed directly to PostgREST which handles it
+        // Note: PostgREST may need the pattern to be properly formatted
         query = query.or(`business_name.ilike.${searchPattern},description.ilike.${searchPattern},city.ilike.${searchPattern}`);
+        
+        console.log('🔍 Applied search filter with pattern:', searchPattern);
       }
 
       // Location/City filter

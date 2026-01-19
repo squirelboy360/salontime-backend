@@ -129,7 +129,17 @@ const config = {
     enable_email_notifications: process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'false',
     enable_analytics: process.env.ENABLE_ANALYTICS !== 'false',
     enable_subscriptions: process.env.ENABLE_SUBSCRIPTIONS !== 'false',
-    enable_webhooks: process.env.ENABLE_WEBHOOKS !== 'false'
+    enable_webhooks: process.env.ENABLE_WEBHOOKS !== 'false',
+    enable_ai: process.env.ENABLE_AI !== 'false'
+  },
+
+  // AI Configuration (Gemini)
+  ai: {
+    gemini_api_key: process.env.GEMINI_API_KEY,
+    gemini_model: process.env.GEMINI_MODEL || 'gemini-pro',
+    max_tokens: parseInt(process.env.AI_MAX_TOKENS) || 2048,
+    temperature: parseFloat(process.env.AI_TEMPERATURE) || 0.7,
+    max_conversation_history: parseInt(process.env.AI_MAX_CONVERSATION_HISTORY) || 10
   },
 
   // Helper methods
