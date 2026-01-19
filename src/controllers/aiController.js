@@ -2,6 +2,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const supabaseService = require('../services/supabaseService');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const config = require('../config');
+const { supabaseAdmin, getAuthenticatedClient } = require('../config/database');
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
@@ -216,10 +217,13 @@ Remember: You have access to real user data through API calls. Use this to provi
   }
 
   // Get user context for AI
-  async getUserContext(userId) {
+  async getUserContext(userId, accessToken) {
     try {
+      // Use authenticated client for RLS
+      const client = accessToken ? getAuthenticatedClient(accessToken) : supabaseAdmin;
+      
       // Get user profile
-      const { data: userProfile, error: profileError } = await supabaseService.supabase
+      const { data: userProfile, error: profileError } = await client
         .from('user_profiles')
         .select('id, first_name, last_name, language')
         .eq('id', userId)
@@ -230,7 +234,7 @@ Remember: You have access to real user data through API calls. Use this to provi
       }
 
       // Get recent bookings (last 5)
-      const { data: recentBookings, error: bookingsError } = await supabaseService.supabase
+      const { data: recentBookings, error: bookingsError } = await client
         .from('bookings')
         .select(`
           id,
@@ -248,7 +252,7 @@ Remember: You have access to real user data through API calls. Use this to provi
       }
 
       // Get favorite salons
-      const { data: favoriteSalons, error: favoritesError } = await supabaseService.supabase
+      const { data: favoriteSalons, error: favoritesError } = await client
         .from('user_favorites')
         .select(`
           salons:salon_id(business_name, city, rating_average)
@@ -282,10 +286,11 @@ Remember: You have access to real user data through API calls. Use this to provi
   getOrCreateConversation = asyncHandler(async (req, res) => {
     const userId = req.user.id;
     const { conversationId } = req.body;
+    const authenticatedClient = getAuthenticatedClient(req.token);
 
     if (conversationId) {
       // Get existing conversation
-      const { data: conversation, error } = await supabaseService.supabase
+      const { data: conversation, error } = await authenticatedClient
         .from('ai_conversations')
         .select('*')
         .eq('id', conversationId)
@@ -303,7 +308,7 @@ Remember: You have access to real user data through API calls. Use this to provi
     }
 
     // Create new conversation
-    const { data: conversation, error } = await supabaseService.supabase
+    const { data: conversation, error } = await authenticatedClient
       .from('ai_conversations')
       .insert({
         user_id: userId,
@@ -326,8 +331,9 @@ Remember: You have access to real user data through API calls. Use this to provi
   getConversations = asyncHandler(async (req, res) => {
     const userId = req.user.id;
     const { limit = 20, offset = 0 } = req.query;
+    const authenticatedClient = getAuthenticatedClient(req.token);
 
-    const { data: conversations, error } = await supabaseService.supabase
+    const { data: conversations, error } = await authenticatedClient
       .from('ai_conversations')
       .select('*')
       .eq('user_id', userId)
@@ -349,9 +355,10 @@ Remember: You have access to real user data through API calls. Use this to provi
   getMessages = asyncHandler(async (req, res) => {
     const userId = req.user.id;
     const { conversationId } = req.params;
+    const authenticatedClient = getAuthenticatedClient(req.token);
 
     // Verify conversation belongs to user
-    const { data: conversation, error: convError } = await supabaseService.supabase
+    const { data: conversation, error: convError } = await authenticatedClient
       .from('ai_conversations')
       .select('id')
       .eq('id', conversationId)
@@ -362,7 +369,7 @@ Remember: You have access to real user data through API calls. Use this to provi
       throw new AppError('Conversation not found', 404, 'CONVERSATION_NOT_FOUND');
     }
 
-    const { data: messages, error } = await supabaseService.supabase
+    const { data: messages, error } = await authenticatedClient
       .from('ai_messages')
       .select('*')
       .eq('conversation_id', conversationId)
@@ -393,9 +400,12 @@ Remember: You have access to real user data through API calls. Use this to provi
 
     let currentConversationId = conversationId;
 
+    // Use authenticated client for RLS
+    const authenticatedClient = getAuthenticatedClient(req.token);
+    
     // Create new conversation if needed
     if (newConversation || !currentConversationId) {
-      const { data: newConv, error: convError } = await supabaseService.supabase
+      const { data: newConv, error: convError } = await authenticatedClient
         .from('ai_conversations')
         .insert({
           user_id: userId,
@@ -411,7 +421,7 @@ Remember: You have access to real user data through API calls. Use this to provi
       currentConversationId = newConv.id;
     } else {
       // Verify conversation belongs to user
-      const { data: conversation, error: convError } = await supabaseService.supabase
+      const { data: conversation, error: convError } = await authenticatedClient
         .from('ai_conversations')
         .select('id')
         .eq('id', currentConversationId)
@@ -424,7 +434,7 @@ Remember: You have access to real user data through API calls. Use this to provi
     }
 
     // Save user message
-    const { data: userMessage, error: userMsgError } = await supabaseService.supabase
+    const { data: userMessage, error: userMsgError } = await authenticatedClient
       .from('ai_messages')
       .insert({
         conversation_id: currentConversationId,
@@ -439,7 +449,7 @@ Remember: You have access to real user data through API calls. Use this to provi
     }
 
     // Get conversation history (last N messages for context)
-    const { data: historyMessages, error: historyError } = await supabaseService.supabase
+    const { data: historyMessages, error: historyError } = await authenticatedClient
       .from('ai_messages')
       .select('role, content')
       .eq('conversation_id', currentConversationId)
@@ -451,7 +461,7 @@ Remember: You have access to real user data through API calls. Use this to provi
     }
 
     // Get user context
-    const userContext = await this.getUserContext(userId);
+    const userContext = await this.getUserContext(userId, req.token);
 
     // Build chat history for Gemini
     const chatHistory = [];
@@ -583,7 +593,7 @@ Remember: You have access to real user data through API calls. Use this to provi
       }
 
       // Save AI response
-      const { data: aiMessage, error: aiMsgError } = await supabaseService.supabase
+      const { data: aiMessage, error: aiMsgError } = await authenticatedClient
         .from('ai_messages')
         .insert({
           conversation_id: currentConversationId,
@@ -603,7 +613,7 @@ Remember: You have access to real user data through API calls. Use this to provi
       }
 
       // Update conversation updated_at
-      await supabaseService.supabase
+      await authenticatedClient
         .from('ai_conversations')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', currentConversationId);
@@ -623,7 +633,8 @@ Remember: You have access to real user data through API calls. Use this to provi
       console.error('Gemini API error:', error);
       
       // Save error message
-      const { data: errorMessage } = await supabaseService.supabase
+      const authenticatedClient = getAuthenticatedClient(req.token);
+      const { data: errorMessage } = await authenticatedClient
         .from('ai_messages')
         .insert({
           conversation_id: currentConversationId,
@@ -647,9 +658,10 @@ Remember: You have access to real user data through API calls. Use this to provi
   deleteConversation = asyncHandler(async (req, res) => {
     const userId = req.user.id;
     const { conversationId } = req.params;
+    const authenticatedClient = getAuthenticatedClient(req.token);
 
     // Verify conversation belongs to user
-    const { data: conversation, error: convError } = await supabaseService.supabase
+    const { data: conversation, error: convError } = await authenticatedClient
       .from('ai_conversations')
       .select('id')
       .eq('id', conversationId)
@@ -661,7 +673,7 @@ Remember: You have access to real user data through API calls. Use this to provi
     }
 
     // Delete conversation (cascade will delete messages)
-    const { error } = await supabaseService.supabase
+    const { error } = await authenticatedClient
       .from('ai_conversations')
       .delete()
       .eq('id', conversationId);
@@ -681,13 +693,14 @@ Remember: You have access to real user data through API calls. Use this to provi
     const userId = req.user.id;
     const { conversationId } = req.params;
     const { title } = req.body;
+    const authenticatedClient = getAuthenticatedClient(req.token);
 
     if (!title || title.trim().length === 0) {
       throw new AppError('Title is required', 400, 'TITLE_REQUIRED');
     }
 
     // Verify conversation belongs to user
-    const { data: conversation, error: convError } = await supabaseService.supabase
+    const { data: conversation, error: convError } = await authenticatedClient
       .from('ai_conversations')
       .select('id')
       .eq('id', conversationId)
@@ -698,7 +711,7 @@ Remember: You have access to real user data through API calls. Use this to provi
       throw new AppError('Conversation not found', 404, 'CONVERSATION_NOT_FOUND');
     }
 
-    const { data: updated, error } = await supabaseService.supabase
+    const { data: updated, error } = await authenticatedClient
       .from('ai_conversations')
       .update({ title: title.trim() })
       .eq('id', conversationId)
