@@ -44,11 +44,13 @@ class AIController {
 
     return `You are an intelligent, proactive AI assistant for SalonTime, a salon booking platform. Think and act like a helpful human assistant would - be proactive, understand context, and take action to help users.
 
+CRITICAL RULE: When a user asks for ANY data (bookings, salons, favorites, etc.), you MUST use the make_api_request function FIRST before responding. NEVER say "no bookings" or "I can help" without first fetching the actual data. This is not optional - it's mandatory.
+
 Your personality:
-- Proactive: When users ask questions, you naturally fetch the information they need without being asked explicitly
+- Proactive: When users ask questions, you IMMEDIATELY fetch the information they need using make_api_request - you don't wait, you don't ask, you just do it
 - Context-aware: You understand conversation history and user intent from natural language
 - Helpful: You anticipate what users might need and provide complete, actionable information
-- Intelligent: You use the available tools (function calling) naturally when you need data to answer questions
+- Intelligent: You ALWAYS use the available tools (function calling) when you need data - this is how you "look things up"
 
 ${contextInfo.length > 0 ? `Current User Context:\n${contextInfo.join('\n')}\n` : ''}
 
@@ -119,7 +121,9 @@ When users ask questions that require data:
 3. Provide a helpful summary and next steps
 4. Never guess or assume - always fetch real data first
 
-Key principle: If you don't have the information to answer a question, you naturally go get it using the available tools. You don't say "I can help" - you just help.
+ABSOLUTE RULE: If a user asks for data (bookings, salons, favorites, etc.), you MUST call make_api_request BEFORE responding. You CANNOT know if they have bookings or not without checking. You CANNOT say "no bookings" without fetching the data first. This is mandatory - not optional.
+
+Key principle: If you don't have the information to answer a question, you IMMEDIATELY go get it using make_api_request. You never say "I can help" or "no bookings" - you fetch the data first, then respond based on what you actually found.
 
 MANDATORY EXAMPLES:
 
@@ -519,13 +523,23 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
     // Use authenticated client for RLS
     const authenticatedClient = getAuthenticatedClient(req.token);
     
+    // Get user context for storing in conversation
+    const userContext = await this.getUserContext(userId, req.token, latitude, longitude);
+    
     // Create new conversation if needed
     if (newConversation || !currentConversationId) {
       const { data: newConv, error: convError } = await authenticatedClient
         .from('ai_conversations')
         .insert({
           user_id: userId,
-          title: message.substring(0, 50) // Use first 50 chars as title
+          title: message.substring(0, 50), // Use first 50 chars as title
+          context: {
+            name: userContext.name,
+            language: userContext.language,
+            location: userContext.location,
+            recentBookingsCount: userContext.recentBookings?.length || 0,
+            favoriteSalonsCount: userContext.favoriteSalons?.length || 0
+          }
         })
         .select()
         .single();
@@ -547,6 +561,20 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
       if (convError || !conversation) {
         throw new AppError('Conversation not found', 404, 'CONVERSATION_NOT_FOUND');
       }
+      
+      // Update context in existing conversation
+      await authenticatedClient
+        .from('ai_conversations')
+        .update({
+          context: {
+            name: userContext.name,
+            language: userContext.language,
+            location: userContext.location,
+            recentBookingsCount: userContext.recentBookings?.length || 0,
+            favoriteSalonsCount: userContext.favoriteSalons?.length || 0
+          }
+        })
+        .eq('id', currentConversationId);
     }
 
     // Save user message
@@ -596,8 +624,7 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
       console.log(`⚠️ No history found for conversation ${currentConversationId} - this is a new conversation`);
     }
 
-    // Get user context with location
-    const userContext = await this.getUserContext(userId, req.token, latitude, longitude);
+    // User context already fetched above
 
     // Build chat history for Gemini
     const chatHistory = [];
@@ -668,91 +695,8 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
         tools: tools,
       });
 
-      // Detect if user is asking for bookings/salons/favorites and force function call if needed
-      const messageLower = message.toLowerCase().trim();
-      
-      // Check conversation history to see if previous messages were about bookings
-      const recentMessages = historyMessages ? historyMessages.slice(-3) : [];
-      const hasRecentBookingContext = recentMessages.some(msg => {
-        const content = (msg.content || '').toLowerCase();
-        return content.includes('boeking') || content.includes('booking') || 
-               content.includes('afspraak') || content.includes('appointment');
-      });
-      
-      const isBookingRequest = messageLower.includes('boeking') || messageLower.includes('booking') || 
-                               messageLower.includes('afspraak') || messageLower.includes('appointment') ||
-                               ((messageLower === 'ja' || messageLower === 'yes') && hasRecentBookingContext);
-      // Enhanced detection for salon requests - check for more keywords and patterns
-      const isSalonRequest = messageLower.includes('salon') || 
-                             messageLower.includes('kapper') || 
-                             messageLower.includes('hairdresser') ||
-                             messageLower.includes('hair cut') ||
-                             messageLower.includes('haircut') ||
-                             messageLower.includes('best salon') ||
-                             messageLower.includes('nearby salon') ||
-                             messageLower.includes('salon near') ||
-                             messageLower.includes('find salon') ||
-                             messageLower.includes('search salon') ||
-                             (messageLower.includes('show me') && (messageLower.includes('salon') || messageLower.includes('hair'))) ||
-                             (messageLower.includes('location') && (messageLower.includes('salon') || messageLower.includes('hair'))) ||
-                             (messageLower.includes('based on') && (messageLower.includes('location') || messageLower.includes('my location')) && (messageLower.includes('salon') || messageLower.includes('hair'))) ||
-                             (messageLower.includes('get my hair') && messageLower.includes('cut'));
-      const isFavoriteRequest = messageLower.includes('favoriet') || messageLower.includes('favorite');
-      
-      // Debug logging
-      if (isSalonRequest) {
-        console.log(`🔍 Detected salon request in message: "${message.substring(0, 100)}"`);
-        console.log(`📍 Location available: lat=${latitude}, lng=${longitude}`);
-      }
-      
-      // PROACTIVE: Force function calls BEFORE sending to AI if it's clearly a data request
-      // This ensures the AI gets the data it needs to answer properly
-      let shouldForceFunctionCall = false;
-      let forcedFunctionCall = null;
-      
-      // Enhanced detection - check for more booking-related phrases
-      const bookingPhrases = ['booking', 'boeking', 'appointment', 'afspraak', 'reservation', 'reservering', 
-                              'my bookings', 'mijn boekingen', 'all bookings', 'alle boekingen',
-                              'list bookings', 'toon boekingen', 'show bookings', 'laat boekingen zien',
-                              'ever made', 'ooit gemaakt', 'previous', 'vorige', 'new and previous'];
-      const hasBookingPhrase = bookingPhrases.some(phrase => messageLower.includes(phrase));
-      
-      if (hasBookingPhrase || isBookingRequest) {
-        shouldForceFunctionCall = true;
-        forcedFunctionCall = {
-          name: 'make_api_request',
-          args: {
-            method: 'GET',
-            endpoint: '/api/bookings'
-          }
-        };
-        console.log(`🔍 Proactively forcing bookings fetch (detected: ${hasBookingPhrase ? 'phrase match' : 'keyword match'})`);
-      } else if (isSalonRequest && latitude && longitude) {
-        shouldForceFunctionCall = true;
-        forcedFunctionCall = {
-          name: 'make_api_request',
-          args: {
-            method: 'GET',
-            endpoint: '/api/salons/nearby',
-            queryParams: {
-              lat: latitude.toString(),
-              lng: longitude.toString(),
-              max_distance: '50'
-            }
-          }
-        };
-        console.log(`🔍 Proactively forcing salon search with location: lat=${latitude}, lng=${longitude}`);
-      } else if (isFavoriteRequest) {
-        shouldForceFunctionCall = true;
-        forcedFunctionCall = {
-          name: 'make_api_request',
-          args: {
-            method: 'GET',
-            endpoint: '/api/favorites'
-          }
-        };
-        console.log(`🔍 Proactively forcing favorites fetch`);
-      }
+      // Let the AI naturally understand user intent - no hardcoded keyword detection
+      // The system prompt should guide the AI to use function calls when needed
       
       // Send the current user message to Gemini
       // Note: The current user message is NOT in chatHistory, we send it now
@@ -765,27 +709,46 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
       let functionCallCount = 0;
       const maxFunctionCallIterations = 5; // Prevent infinite loops
       
-      // If we proactively forced a function call and AI didn't make one, use our forced call
-      if (shouldForceFunctionCall && (!currentFunctionCalls || currentFunctionCalls.length === 0) && forcedFunctionCall) {
-        console.log(`⚠️ AI didn't make function call, using proactive fallback`);
-        currentFunctionCalls = [forcedFunctionCall];
-      }
-      
-      // Fallback: Only force function calls if AI didn't make any AND the response suggests it should have
-      // This is a safety net, but the AI should naturally use function calling based on the improved prompt
+      // Safety check: If AI didn't make a function call but the response suggests it should have,
+      // force a function call as a fallback. This ensures reliability without hardcoding keywords.
       if ((!currentFunctionCalls || currentFunctionCalls.length === 0)) {
         const responseText = (response.text && typeof response.text === 'function') ? response.text() : (response.text || '');
         const responseLower = responseText.toLowerCase();
-        const seemsLikeDataRequest = responseLower.includes("couldn't find") || 
-                                     responseLower.includes("don't have") ||
-                                     responseLower.includes("i can help") ||
-                                     responseLower.includes("how can i help") ||
-                                     responseLower.includes("would you like me to search");
+        const messageLower = message.toLowerCase();
         
-        // Only force if AI didn't make a function call AND the response suggests it should have fetched data
-        if (seemsLikeDataRequest) {
-          if (isBookingRequest) {
-            console.log(`⚠️ AI didn't fetch bookings but should have - forcing as fallback`);
+        // Check if response suggests data should have been fetched but wasn't
+        const seemsLikeDataRequest = 
+          responseLower.includes("don't have") ||
+          responseLower.includes("no bookings") ||
+          responseLower.includes("no salons") ||
+          responseLower.includes("couldn't find") ||
+          responseLower.includes("i can help") ||
+          responseLower.includes("how can i help") ||
+          responseLower.includes("would you like me to search") ||
+          responseLower.includes("i don't have access") ||
+          (responseLower.includes("verwerkt") && !responseLower.includes("genui")) || // Dutch "processed" without GenUI
+          (responseLower.includes("processed") && !responseLower.includes("genui"));
+        
+        // Check if user message suggests they want data
+        const userWantsData = 
+          messageLower.includes('show') ||
+          messageLower.includes('toon') ||
+          messageLower.includes('list') ||
+          messageLower.includes('get') ||
+          messageLower.includes('find') ||
+          messageLower.includes('zoek') ||
+          messageLower.includes('my') ||
+          messageLower.includes('mijn') ||
+          messageLower.includes('all') ||
+          messageLower.includes('alle');
+        
+        // If both conditions are true, force a function call based on message content
+        if (seemsLikeDataRequest && userWantsData) {
+          console.log(`⚠️ AI didn't make function call but should have - forcing fallback`);
+          
+          // Determine which endpoint to call based on message content
+          if (messageLower.includes('booking') || messageLower.includes('boeking') || 
+              messageLower.includes('appointment') || messageLower.includes('afspraak')) {
             currentFunctionCalls = [{
               name: 'make_api_request',
               args: {
@@ -793,9 +756,10 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
                 endpoint: '/api/bookings'
               }
             }];
-          } else if (isSalonRequest) {
+            console.log(`🔍 Forcing bookings fetch as fallback`);
+          } else if (messageLower.includes('salon') || messageLower.includes('kapper') || 
+                     messageLower.includes('hair') || messageLower.includes('hairdresser')) {
             if (latitude && longitude) {
-              console.log(`⚠️ AI didn't fetch salons but should have - forcing as fallback with location: lat=${latitude}, lng=${longitude}`);
               currentFunctionCalls = [{
                 name: 'make_api_request',
                 args: {
@@ -808,8 +772,8 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
                   }
                 }
               }];
+              console.log(`🔍 Forcing salon search as fallback with location`);
             } else {
-              console.log(`⚠️ AI didn't fetch salons but should have - forcing as fallback without location`);
               currentFunctionCalls = [{
                 name: 'make_api_request',
                 args: {
@@ -820,9 +784,9 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
                   }
                 }
               }];
+              console.log(`🔍 Forcing salon search as fallback without location`);
             }
-          } else if (isFavoriteRequest) {
-            console.log(`⚠️ AI didn't fetch favorites but should have - forcing as fallback`);
+          } else if (messageLower.includes('favorit') || messageLower.includes('favorite') || messageLower.includes('favourite') || messageLower.includes('favourites')) {
             currentFunctionCalls = [{
               name: 'make_api_request',
               args: {
@@ -830,6 +794,7 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
                 endpoint: '/api/favorites'
               }
             }];
+            console.log(`🔍 Forcing favorites fetch as fallback`);
           }
         }
       }
