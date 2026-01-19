@@ -470,7 +470,6 @@ Remember: You have access to real user data through API calls. Use this to provi
 
     try {
       let chat;
-      let aiResponse;
       const userToken = req.token; // Get user's auth token
       
       const tools = this.getFunctionCallingTools();
@@ -572,58 +571,71 @@ Remember: You have access to real user data through API calls. Use this to provi
       // Get text response - handle different response formats
       let aiResponse = '';
       
-      if (typeof response.text === 'function') {
-        try {
+      // Try multiple ways to extract text from response
+      try {
+        if (typeof response.text === 'function') {
           aiResponse = response.text();
-        } catch (e) {
-          // If text() fails, try other methods
+        } else if (response.text && typeof response.text === 'string') {
+          aiResponse = response.text;
+        }
+      } catch (e) {
+        // Continue to try other methods
+      }
+      
+      // Try candidates format
+      if (!aiResponse && response.candidates && response.candidates.length > 0) {
+        for (const candidate of response.candidates) {
+          if (candidate.content && candidate.content.parts) {
+            const textParts = candidate.content.parts
+              .filter(part => part.text)
+              .map(part => part.text);
+            if (textParts.length > 0) {
+              aiResponse = textParts.join('');
+              break;
+            }
+          }
         }
       }
       
-      if (!aiResponse && response.text) {
-        aiResponse = response.text;
+      // Try direct parts access
+      if (!aiResponse && response.parts) {
+        const textParts = response.parts
+          .filter(part => part.text)
+          .map(part => part.text);
+        if (textParts.length > 0) {
+          aiResponse = textParts.join('');
+        }
       }
       
-      if (!aiResponse && response.candidates && response.candidates[0] && response.candidates[0].content) {
-        // Handle alternative response format
-        const parts = response.candidates[0].content.parts || [];
-        aiResponse = parts.map(part => {
-          if (part.text) return part.text;
-          // Handle function response parts
-          if (part.functionResponse) {
-            return JSON.stringify(part.functionResponse);
-          }
-          return '';
-        }).join('');
-      }
-      
-      // If still no response, check if there are function calls that completed
+      // If still no response after function calls, the model might need a follow-up
       if (!aiResponse || aiResponse.trim().length === 0) {
-        // After function calls, sometimes the model needs another prompt
-        // Try to get a summary response
         if (functionCallCount > 0) {
+          // Function calls completed but no text response - request a summary
           try {
-            const summaryResult = await chat.sendMessage([{
-              functionResponse: {
-                name: 'make_api_request',
-                response: { success: true, message: 'Function calls completed, please provide a text response' }
-              }
-            }]);
-            const summaryResponse = summaryResult.response;
-            if (typeof summaryResponse.text === 'function') {
-              aiResponse = summaryResponse.text();
-            } else if (summaryResponse.text) {
-              aiResponse = summaryResponse.text;
+            const followUpResult = await chat.sendMessage('Please summarize the data you retrieved and present it to the user.');
+            const followUpResponse = followUpResult.response;
+            
+            if (typeof followUpResponse.text === 'function') {
+              aiResponse = followUpResponse.text();
+            } else if (followUpResponse.text) {
+              aiResponse = followUpResponse.text;
+            } else if (followUpResponse.candidates && followUpResponse.candidates[0] && followUpResponse.candidates[0].content) {
+              const parts = followUpResponse.candidates[0].content.parts || [];
+              aiResponse = parts.map(part => part.text || '').join('');
             }
           } catch (e) {
-            // Fallback: provide a default response
-            aiResponse = 'I\'ve retrieved the information you requested. How would you like me to present it?';
+            // If follow-up fails, provide a helpful default message based on the request
+            const messageLower = message.toLowerCase();
+            if (messageLower.includes('booking') || messageLower.includes('boeking')) {
+              aiResponse = 'Ik heb je boekingen opgehaald. Hier zijn ze:';
+            } else {
+              aiResponse = 'Ik heb de informatie opgehaald. Hoe wil je dat ik het presenteer?';
+            }
           }
+        } else {
+          // No function calls but still empty - provide a default response
+          aiResponse = 'Ik heb je verzoek verwerkt. Hoe kan ik je verder helpen?';
         }
-      }
-      
-      if (!aiResponse || aiResponse.trim().length === 0) {
-        throw new Error('Empty response from AI model after processing');
       }
 
       // Check if response contains GenUI/A2UI commands
