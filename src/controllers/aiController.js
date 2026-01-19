@@ -568,16 +568,32 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
     // IMPORTANT: Load history AFTER saving user message so it includes the current message
     const { data: historyMessages, error: historyError } = await authenticatedClient
       .from('ai_messages')
-      .select('role, content, created_at')
+      .select('role, content, created_at, metadata')
       .eq('conversation_id', currentConversationId)
       .order('created_at', { ascending: true })
       .limit(config.ai.max_conversation_history);
 
     // Log history for debugging
+    if (historyError) {
+      console.error(`❌ Error loading conversation history:`, historyError);
+    }
+    
     if (historyMessages && historyMessages.length > 0) {
       console.log(`📚 Loaded ${historyMessages.length} messages from history for conversation ${currentConversationId}`);
+      // Log message breakdown
+      const userMsgs = historyMessages.filter(m => m.role === 'user').length;
+      const assistantMsgs = historyMessages.filter(m => m.role === 'assistant').length;
+      console.log(`📚 History breakdown: ${userMsgs} user messages, ${assistantMsgs} assistant messages`);
+      
+      // Log a sample of recent messages for debugging
+      if (historyMessages.length > 2) {
+        const recent = historyMessages.slice(-4, -1); // Last 3 messages (excluding current)
+        recent.forEach((msg, idx) => {
+          console.log(`📚 History[${historyMessages.length - 3 + idx}]: ${msg.role} - ${msg.content.substring(0, 60)}...`);
+        });
+      }
     } else {
-      console.log(`⚠️ No history found for conversation ${currentConversationId}`);
+      console.log(`⚠️ No history found for conversation ${currentConversationId} - this is a new conversation`);
     }
 
     // Get user context with location
@@ -605,6 +621,15 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
       });
       
       console.log(`📝 Added ${messagesToInclude.length} messages to chat history (excluded current user message)`);
+      // Log first and last few messages for debugging
+      if (messagesToInclude.length > 0) {
+        console.log(`📝 First message: ${messagesToInclude[0].role} - ${messagesToInclude[0].content.substring(0, 50)}...`);
+        if (messagesToInclude.length > 1) {
+          console.log(`📝 Last message: ${messagesToInclude[messagesToInclude.length - 1].role} - ${messagesToInclude[messagesToInclude.length - 1].content.substring(0, 50)}...`);
+        }
+      }
+    } else {
+      console.log(`⚠️ No previous messages in conversation ${currentConversationId} - this is a new conversation`);
     }
 
     try {
@@ -613,15 +638,12 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
       
       const tools = this.getFunctionCallingTools(userContext);
       
-      // Always include system prompt in history to ensure AI knows to use function calls
-      // Check if system prompt is already in history
-      const hasSystemPrompt = chatHistory.some(msg => 
-        msg.role === 'user' && msg.parts && msg.parts[0] && msg.parts[0].text && 
-        msg.parts[0].text.includes('CRITICAL WORKFLOW')
-      );
-      
-      if (!hasSystemPrompt) {
-        // Prepend system prompt to history
+      // Only add system prompt for NEW conversations (when history is empty)
+      // For existing conversations, the AI should understand from the conversation context
+      // Adding system prompt every time disrupts the natural conversation flow
+      if (chatHistory.length === 0) {
+        // New conversation - add system prompt once
+        console.log(`📝 New conversation - adding system prompt`);
         chatHistory.unshift({
           role: 'model',
           parts: [{ text: 'I understand. I will ALWAYS use function calls when users ask for data, and then generate GenUI to display it.' }]
@@ -630,9 +652,13 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
           role: 'user',
           parts: [{ text: systemPrompt }]
         });
+      } else {
+        console.log(`📝 Existing conversation with ${chatHistory.length} messages - using conversation context`);
       }
       
-      // Start chat with tools and system prompt
+      console.log(`💬 Starting chat with ${chatHistory.length} messages in history`);
+      
+      // Start chat with tools and history
       chat = this.model.startChat({
         history: chatHistory,
         generationConfig: {
