@@ -44,7 +44,9 @@ class AIController {
 
     return `You are an intelligent, proactive AI assistant for SalonTime, a salon booking platform. Think and act like a helpful human assistant would - be proactive, understand context, and take action to help users.
 
-CRITICAL RULE: When a user asks for ANY data (bookings, salons, favorites, etc.), you MUST use the make_api_request function FIRST before responding. NEVER say "no bookings" or "I can help" without first fetching the actual data. This is not optional - it's mandatory.
+CRITICAL RULE #1: When a user asks for ANY data (bookings, salons, favorites, etc.), you MUST use the make_api_request function FIRST before responding. NEVER say "no bookings", "I can help", "Ik heb je verzoek verwerkt", or any generic acknowledgment without first fetching the actual data. This is not optional - it's mandatory.
+
+CRITICAL RULE #2: After fetching data using make_api_request, you MUST ALWAYS generate HTML/CSS to display that data visually. NEVER respond with just text like "Ik heb je verzoek verwerkt" after fetching data. You MUST wrap the data in <output> tags with HTML cards using the ai-card class. This is mandatory - no exceptions.
 
 Your personality:
 - Proactive: When users ask questions, you IMMEDIATELY fetch the information they need using make_api_request - you don't wait, you don't ask, you just do it
@@ -250,16 +252,61 @@ Guidelines:
 - ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in English'}
 
 HTML OUTPUT FORMAT:
-When displaying data, wrap your HTML in <output> tags. Example:
+When displaying data, wrap your HTML in <output> tags. Use CSS classes that match shadcn UI design system - DO NOT use inline styles. The following classes are available:
+
+CARDS:
+- Use class="ai-card" for clickable cards (salons, bookings, etc.)
+- Use data-salon-id="..." for salon navigation
+- Use data-booking-id="..." for booking navigation
+- Include images with class="ai-image"
+- Use <h3> or <h4> for titles (automatically styled)
+- Use <p> for descriptions (automatically styled)
+
+BUTTONS:
+- Use class="ai-button" for primary buttons
+- Use class="ai-button secondary" for secondary buttons
+
+LISTS:
+- Use class="ai-list" for list containers
+- Use class="ai-list-item" for list items
+
+IMAGES:
+- Use class="ai-image" for images (automatically styled with borders and rounded corners)
+
+Example for salon cards:
 <output>
-<div class="card" data-salon-id="actual_id" style="background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 12px; cursor: pointer;">
-  <img src="actual_image_url" style="width: 100%; border-radius: 8px; margin-bottom: 12px;" />
-  <h3 style="margin: 0 0 8px 0;">Actual Salon Name</h3>
-  <p style="margin: 4px 0; color: #666;">Actual Address</p>
+<div class="ai-card" data-salon-id="actual_id">
+  <img src="actual_image_url" class="ai-image" alt="Salon Name" />
+  <h3>Actual Salon Name</h3>
+  <p>Actual Address</p>
+  <p>Rating: 4.5/5</p>
 </div>
 </output>
 
-Remember: You're an intelligent assistant. When someone asks you something, you naturally go get the information they need and present it helpfully using HTML/CSS.`;
+Example for booking cards:
+<output>
+<div class="ai-card" data-booking-id="actual_id">
+  <img src="salon_image_url" class="ai-image" alt="Salon Name" />
+  <h3>Service Name</h3>
+  <p>Salon: Actual Salon Name</p>
+  <p>Date: January 20, 2024 at 2:00 PM</p>
+</div>
+</output>
+
+Example for buttons:
+<output>
+<button class="ai-button" data-salon-id="actual_id">Book Now</button>
+<button class="ai-button secondary" data-action="view-details">View Details</button>
+</output>
+
+CRITICAL: 
+- NEVER use inline styles (style="...")
+- ALWAYS use the provided CSS classes
+- All colors, borders, and spacing are handled by the CSS classes
+- Text colors automatically adapt to dark/light mode
+- Cards are automatically clickable and styled
+
+Remember: You're an intelligent assistant. When someone asks you something, you naturally go get the information they need and present it helpfully using HTML with the provided CSS classes.`;
   }
 
   // Make authenticated API request on behalf of user
@@ -744,7 +791,7 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
           (responseLower.includes("verwerkt") && !responseLower.includes("genui")) || // Dutch "processed" without GenUI
           (responseLower.includes("processed") && !responseLower.includes("genui"));
         
-        // Check if user message suggests they want data
+        // Check if user message suggests they want data - be more aggressive
         const userWantsData = 
           messageLower.includes('show') ||
           messageLower.includes('toon') ||
@@ -755,10 +802,18 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
           messageLower.includes('my') ||
           messageLower.includes('mijn') ||
           messageLower.includes('all') ||
-          messageLower.includes('alle');
+          messageLower.includes('alle') ||
+          messageLower.includes('booking') ||
+          messageLower.includes('boeking') ||
+          messageLower.includes('appointment') ||
+          messageLower.includes('afspraak') ||
+          messageLower.includes('salon') ||
+          messageLower.includes('favorit') ||
+          messageLower.includes('favorite');
         
-        // If both conditions are true, force a function call based on message content
-        if (seemsLikeDataRequest && userWantsData) {
+        // If response suggests data should have been fetched OR user explicitly wants data, force function call
+        // Be more aggressive - if user wants data, always fetch it
+        if (userWantsData || seemsLikeDataRequest) {
           console.log(`⚠️ AI didn't make function call but should have - forcing fallback`);
           
           // Determine which endpoint to call based on message content
@@ -866,33 +921,39 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
           // Update currentFunctionCalls for next iteration
           currentFunctionCalls = response.functionCalls || (response.functionCall ? [response.functionCall] : []);
           
-          // If no more function calls, ensure GenUI is generated
+          // If no more function calls, ensure HTML is generated
           if (currentFunctionCalls.length === 0 && lastResponseData) {
-            // Check if response already has GenUI or if we need to request it
+            // Check if response already has HTML
             const responseText = typeof response.text === 'function' ? response.text() : (response.text || '');
-            const hasGenUI = responseText.includes('genui') || responseText.includes('beginRendering') || responseText.includes('```json');
+            const hasHTML = responseText.includes('<output>') || responseText.includes('<div class="ai-card"') || responseText.includes('ai-card');
             
-            if (!hasGenUI) {
-              // Force GenUI generation with the actual data
+            if (!hasHTML) {
+              // Force HTML generation with the actual data
               const messageLower = message.toLowerCase();
-              let genuiPrompt = '';
+              let htmlPrompt = '';
               
               if (messageLower.includes('booking') || messageLower.includes('boeking')) {
                 const bookingCount = Array.isArray(lastResponseData) ? lastResponseData.length : (lastResponseData?.data?.length || 0);
-                genuiPrompt = `Je hebt ${bookingCount} boekingen opgehaald. Gebruik deze data om GenUI JSON te genereren. Maak een List component met Card items. Voor elke booking in de data, maak een Card met: salon naam, service naam, datum, tijd, en status. Gebruik de exacte data die je hebt ontvangen. Genereer de GenUI JSON nu direct in je antwoord.`;
+                const bookings = Array.isArray(lastResponseData) ? lastResponseData : (lastResponseData?.data || []);
+                htmlPrompt = `Je hebt ${bookingCount} boekingen opgehaald. Gebruik deze EXACTE data om HTML te genereren. Maak HTML cards met class="ai-card" en data-booking-id voor elke booking. Gebruik de volgende data: ${JSON.stringify(bookings.slice(0, 5))}. Wrap alles in <output> tags. Genereer de HTML NU direct in je antwoord - geen tekst, alleen HTML in <output> tags.`;
               } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
                 const salonCount = Array.isArray(lastResponseData) ? lastResponseData.length : (lastResponseData?.data?.length || 0);
-                genuiPrompt = `Je hebt ${salonCount} salons opgehaald. Gebruik deze data om GenUI JSON te genereren. Maak een List component met Card items voor elke salon. Genereer de GenUI JSON nu direct.`;
+                const salons = Array.isArray(lastResponseData) ? lastResponseData : (lastResponseData?.data || []);
+                htmlPrompt = `Je hebt ${salonCount} salons opgehaald. Gebruik deze EXACTE data om HTML te genereren. Maak HTML cards met class="ai-card" en data-salon-id voor elke salon. Gebruik de volgende data: ${JSON.stringify(salons.slice(0, 5))}. Wrap alles in <output> tags. Genereer de HTML NU direct - geen tekst, alleen HTML in <output> tags.`;
+              } else if (messageLower.includes('favorit') || messageLower.includes('favorite')) {
+                const favoriteCount = Array.isArray(lastResponseData) ? lastResponseData.length : (lastResponseData?.data?.length || 0);
+                const favorites = Array.isArray(lastResponseData) ? lastResponseData : (lastResponseData?.data || []);
+                htmlPrompt = `Je hebt ${favoriteCount} favorieten opgehaald. Gebruik deze EXACTE data om HTML te genereren. Maak HTML cards met class="ai-card" en data-salon-id voor elke favoriet. Gebruik de volgende data: ${JSON.stringify(favorites.slice(0, 5))}. Wrap alles in <output> tags. Genereer de HTML NU direct - geen tekst, alleen HTML in <output> tags.`;
               } else {
-                genuiPrompt = 'Gebruik de data die je hebt ontvangen om GenUI JSON te genereren. Maak een visuele weergave met List en Card componenten. Genereer de GenUI JSON nu direct.';
+                htmlPrompt = `Je hebt data opgehaald. Gebruik deze EXACTE data om HTML te genereren met class="ai-card". Wrap alles in <output> tags. Genereer de HTML NU direct - geen tekst, alleen HTML in <output> tags.`;
               }
               
-              const genuiResult = await chat.sendMessage(genuiPrompt);
-              const genuiResponse = genuiResult.response;
-              if (typeof genuiResponse.text === 'function') {
-                response.text = genuiResponse.text();
-              } else if (genuiResponse.text) {
-                response.text = genuiResponse.text;
+              const htmlResult = await chat.sendMessage(htmlPrompt);
+              const htmlResponse = htmlResult.response;
+              if (typeof htmlResponse.text === 'function') {
+                response.text = htmlResponse.text();
+              } else if (htmlResponse.text) {
+                response.text = htmlResponse.text;
               }
             }
           }
