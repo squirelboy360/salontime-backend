@@ -234,12 +234,8 @@ Remember: You have access to real user data through API calls. Use this to provi
         .eq('id', userId)
         .single();
 
-      if (profileError) {
-        console.error('Error fetching user profile:', profileError);
-      }
-
       // Get recent bookings (last 5)
-      const { data: recentBookings, error: bookingsError } = await client
+      const { data: recentBookings } = await client
         .from('bookings')
         .select(`
           id,
@@ -252,22 +248,14 @@ Remember: You have access to real user data through API calls. Use this to provi
         .order('start_time', { ascending: false })
         .limit(5);
 
-      if (bookingsError) {
-        console.error('Error fetching recent bookings:', bookingsError);
-      }
-
       // Get favorite salons
-      const { data: favoriteSalons, error: favoritesError } = await client
+      const { data: favoriteSalons } = await client
         .from('user_favorites')
         .select(`
           salons:salon_id(business_name, city, rating_average)
         `)
         .eq('user_id', userId)
         .limit(10);
-
-      if (favoritesError) {
-        console.error('Error fetching favorite salons:', favoritesError);
-      }
 
       return {
         userId: userId,
@@ -393,19 +381,12 @@ Remember: You have access to real user data through API calls. Use this to provi
 
   // Send message to AI
   sendMessage = asyncHandler(async (req, res) => {
-    console.log('🤖 sendMessage called');
-    console.log('🤖 Model initialized:', !!this.model);
-    console.log('🤖 GEMINI_API_KEY set:', !!config.ai.gemini_api_key);
-    
     if (!this.model) {
-      console.error('❌ AI model not initialized');
       throw new AppError('AI service is not available. GEMINI_API_KEY may not be set.', 503, 'AI_SERVICE_UNAVAILABLE');
     }
 
     const userId = req.user.id;
     const { conversationId, message, newConversation, latitude, longitude } = req.body;
-
-    console.log('🤖 Request params:', { userId, conversationId, message: message?.substring(0, 50), newConversation, latitude, longitude });
 
     if (!message || message.trim().length === 0) {
       throw new AppError('Message is required', 400, 'MESSAGE_REQUIRED');
@@ -480,9 +461,6 @@ Remember: You have access to real user data through API calls. Use this to provi
     const chatHistory = [];
     const systemPrompt = this.getSystemPrompt(userContext);
 
-    console.log('🤖 Building chat history');
-    console.log('🤖 History messages count:', historyMessages?.length || 0);
-
     // Add conversation history
     if (historyMessages && historyMessages.length > 0) {
       historyMessages.forEach(msg => {
@@ -495,78 +473,48 @@ Remember: You have access to real user data through API calls. Use this to provi
       });
     }
 
-    console.log('🤖 Chat history length:', chatHistory.length);
-    console.log('🤖 System prompt length:', systemPrompt.length);
-
     try {
       let chat;
       let aiResponse;
       const userToken = req.token; // Get user's auth token
       
       const tools = this.getFunctionCallingTools();
-      console.log('🤖 Function calling tools:', JSON.stringify(tools, null, 2));
       
       // If this is the first message, include system prompt in history
       if (chatHistory.length === 0) {
-        console.log('🤖 Starting new chat with system prompt');
         // First message - include system prompt as initial context
-        try {
-          chat = this.model.startChat({
-            history: [
-              {
-                role: 'user',
-                parts: [{ text: systemPrompt }]
-              },
-              {
-                role: 'model',
-                parts: [{ text: 'I understand. I\'m ready to help you with salon bookings and questions. How can I assist you today?' }]
-              }
-            ],
-            generationConfig: {
-              maxOutputTokens: config.ai.max_tokens,
-              temperature: config.ai.temperature,
+        chat = this.model.startChat({
+          history: [
+            {
+              role: 'user',
+              parts: [{ text: systemPrompt }]
             },
-            tools: tools,
-          });
-          console.log('✅ Chat started successfully');
-        } catch (chatError) {
-          console.error('❌ Error starting chat:', chatError);
-          throw chatError;
-        }
+            {
+              role: 'model',
+              parts: [{ text: 'I understand. I\'m ready to help you with salon bookings and questions. How can I assist you today?' }]
+            }
+          ],
+          generationConfig: {
+            maxOutputTokens: config.ai.max_tokens,
+            temperature: config.ai.temperature,
+          },
+          tools: tools,
+        });
       } else {
-        console.log('🤖 Continuing existing conversation');
         // Continue existing conversation (system prompt already in first message)
-        try {
-          chat = this.model.startChat({
-            history: chatHistory,
-            generationConfig: {
-              maxOutputTokens: config.ai.max_tokens,
-              temperature: config.ai.temperature,
-            },
-            tools: tools,
-          });
-          console.log('✅ Chat started successfully');
-        } catch (chatError) {
-          console.error('❌ Error starting chat:', chatError);
-          throw chatError;
-        }
+        chat = this.model.startChat({
+          history: chatHistory,
+          generationConfig: {
+            maxOutputTokens: config.ai.max_tokens,
+            temperature: config.ai.temperature,
+          },
+          tools: tools,
+        });
       }
 
-      console.log('🤖 Sending message to Gemini:', message.trim().substring(0, 100));
-      
       // Send message and handle function calls
-      let result;
-      try {
-        result = await chat.sendMessage(message.trim());
-        console.log('✅ Message sent, got result');
-      } catch (sendError) {
-        console.error('❌ Error sending message:', sendError);
-        throw sendError;
-      }
-      
+      let result = await chat.sendMessage(message.trim());
       let response = result.response;
-      console.log('🤖 Response received, type:', typeof response);
-      console.log('🤖 Response keys:', response ? Object.keys(response) : 'null');
       
       // Handle function calls - check both functionCalls and functionCall (singular)
       let currentFunctionCalls = response.functionCalls || (response.functionCall ? [response.functionCall] : []);
@@ -575,10 +523,9 @@ Remember: You have access to real user data through API calls. Use this to provi
         const functionResponses = [];
 
         for (const functionCall of currentFunctionCalls) {
-          if (functionCall.name === 'make_api_request') {
-            try {
-              const { method, endpoint, body, queryParams } = functionCall.args;
-              console.log(`🤖 AI making API request: ${method} ${endpoint}`);
+              if (functionCall.name === 'make_api_request') {
+                try {
+                  const { method, endpoint, body, queryParams } = functionCall.args;
               
               const apiResponse = await this.makeApiRequest(
                 userId,
@@ -631,16 +578,12 @@ Remember: You have access to real user data through API calls. Use this to provi
         const parts = response.candidates[0].content.parts || [];
         aiResponse = parts.map(part => part.text || '').join('');
       } else {
-        console.error('❌ Unexpected response format:', JSON.stringify(response, null, 2));
         throw new Error('Unexpected response format from Gemini API');
       }
       
       if (!aiResponse || aiResponse.trim().length === 0) {
-        console.error('❌ Empty response from Gemini');
         throw new Error('Empty response from AI model');
       }
-      
-      console.log('✅ AI response received:', aiResponse.substring(0, 100) + '...');
 
       // Check if response contains GenUI/A2UI commands
       // The AI might include GenUI commands in its response
@@ -656,11 +599,10 @@ Remember: You have access to real user data through API calls. Use this to provi
             // Remove GenUI JSON from text response
             aiResponse = aiResponse.replace(/```json\s*{[\s\S]*?}\s*```/g, '').trim();
           }
-        }
-      } catch (e) {
-        // If parsing fails, continue without GenUI
-        console.log('Could not parse GenUI from response:', e);
-      }
+                }
+              } catch (e) {
+                // If parsing fails, continue without GenUI
+              }
 
       // Save AI response
       const { data: aiMessage, error: aiMsgError } = await authenticatedClient
@@ -700,19 +642,8 @@ Remember: You have access to real user data through API calls. Use this to provi
         }
       });
     } catch (error) {
-      console.error('❌ Gemini API error:', error);
-      console.error('❌ Error stack:', error.stack);
-      console.error('❌ Error details:', {
-        message: error.message,
-        name: error.name,
-        code: error.code,
-        cause: error.cause,
-        response: error.response
-      });
-      
       // Check if model is initialized
       if (!this.model) {
-        console.error('❌ Gemini model not initialized - check GEMINI_API_KEY');
         throw new AppError(
           'AI service is not available. Please check server configuration.',
           503,
@@ -723,7 +654,7 @@ Remember: You have access to real user data through API calls. Use this to provi
       // Save error message
       try {
         const authenticatedClient = getAuthenticatedClient(req.token);
-        const { data: errorMessage } = await authenticatedClient
+        await authenticatedClient
           .from('ai_messages')
           .insert({
             conversation_id: currentConversationId,
@@ -738,7 +669,7 @@ Remember: You have access to real user data through API calls. Use this to provi
           .select()
           .single();
       } catch (saveError) {
-        console.error('❌ Failed to save error message:', saveError);
+        // Silently fail error message saving
       }
 
       // Return more detailed error to help debugging
