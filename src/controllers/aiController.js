@@ -93,33 +93,87 @@ ANALYTICS:
 - GET /api/analytics/salons/new - Get new salons
 - GET /api/analytics/salons/featured - Get featured salons
 
-When you need to make API calls:
-1. Use the "make_api_request" function tool to call these endpoints
-2. The request will automatically include the user's authentication token
-3. All responses are automatically scoped to the current user (userId: ${userContext.userId || 'current_user'})
-4. If a request fails or returns no data, explain this to the user
-5. After getting API data, present it in a helpful, readable format
+CRITICAL WORKFLOW - YOU MUST FOLLOW THIS EXACTLY:
 
-When you cannot fulfill a request via API or when the user asks for dynamic UI:
-- Use GenUI (A2UI) format to generate dynamic Flutter UI components
-- You can generate: Text, Markdown, Image, Button, TextField, Card, List, etc.
-- Use the beginRendering command to create new UI surfaces
-- Use surfaceUpdate to update existing surfaces
-- Use dataModelUpdate to update the data model that widgets are bound to
-- Example: If user asks "show me my bookings in a list", first call the API to get bookings, then generate a List UI component with the data
+When a user asks for ANY data (bookings, salons, favorites, reviews, etc.):
+1. IMMEDIATELY use make_api_request function to fetch the data - DO NOT just acknowledge
+2. After receiving data, ALWAYS generate GenUI JSON to display it visually
+3. Include GenUI JSON in your response metadata field
+4. Provide a brief text summary along with the UI
+
+MANDATORY EXAMPLES:
+
+User: "laat mij alle boekingen zien" or "show me my bookings"
+YOU MUST:
+1. Call: make_api_request(method: "GET", endpoint: "/api/bookings")
+2. After getting bookings data, generate GenUI like this in your response metadata:
+{
+  "genui": {
+    "command": "beginRendering",
+    "surfaceId": "bookings_list",
+    "content": {
+      "List": {
+        "items": [
+          {
+            "Card": {
+              "child": {
+                "Column": {
+                  "children": [
+                    {"Text": {"literalString": "Salon: [salon_name]"}},
+                    {"Text": {"literalString": "Date: [appointment_date]"}},
+                    {"Text": {"literalString": "Time: [start_time]"}},
+                    {"Button": {"label": "Details", "onPressed": {"action": "navigate"}}}
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+3. Text response: "Hier zijn je boekingen:" (or similar)
+
+User: "find salons near me" or "vind salons bij mij"
+YOU MUST:
+1. Call: make_api_request(method: "GET", endpoint: "/api/salons/nearby?lat=[lat]&lng=[lng]")
+2. Generate GenUI List with salon cards
+3. Include GenUI in metadata
+
+User: "book an appointment" or "boek een afspraak"
+YOU MUST:
+1. Call: make_api_request(method: "GET", endpoint: "/api/services?salon_id=[id]")
+2. Generate GenUI form with TextField, Button components
+3. Include GenUI in metadata
+
+GenUI Components Available:
+- Text: {"Text": {"literalString": "text"}}
+- Markdown: {"Markdown": {"content": "# markdown"}}
+- Button: {"Button": {"label": "Click", "onPressed": {"action": "..."}}}
+- Card: {"Card": {"child": {...}}}
+- List: {"List": {"items": [...]}}
+- Column: {"Column": {"children": [...]}}
+- Row: {"Row": {"children": [...]}}
+- TextField: {"TextField": {"placeholder": "...", "path": "data.field"}}
+- Container: {"Container": {"child": {...}, "color": "#FF0000"}}
+
+ABSOLUTE RULES:
+- NEVER respond with "I can help" or "How can I help" when user asks for specific data
+- ALWAYS use make_api_request FIRST when data is requested
+- ALWAYS generate GenUI after fetching data
+- ALWAYS include GenUI JSON in response metadata
+- If you don't fetch data, you are FAILING the user's request
 
 Guidelines:
 - Be friendly, professional, and helpful
-- Help users find salons based on their preferences (location, services, ratings, etc.)
-- When users ask about their bookings, use the API to fetch real data
-- When users want to see salon details, use the API to fetch real data
-- When you need to show complex data or forms, use GenUI to generate appropriate UI
+- ALWAYS fetch real data via API - never assume or guess
+- ALWAYS generate GenUI after fetching data
 - Provide recommendations based on user preferences and history
-- If you don't know something, suggest the user check the app or contact support
 - Keep responses concise and actionable
 - ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in English'}
 
-Remember: You have access to real user data through API calls. Use this to provide accurate, personalized assistance.`;
+Remember: When user asks for data, you MUST use function calling to get it, then use GenUI to display it. No exceptions.`;
   }
 
   // Make authenticated API request on behalf of user
@@ -474,38 +528,53 @@ Remember: You have access to real user data through API calls. Use this to provi
       
       const tools = this.getFunctionCallingTools();
       
-      // If this is the first message, include system prompt in history
-      if (chatHistory.length === 0) {
-        // First message - include system prompt as initial context
-        chat = this.model.startChat({
-          history: [
-            {
-              role: 'user',
-              parts: [{ text: systemPrompt }]
-            },
-            {
-              role: 'model',
-              parts: [{ text: 'I understand. I\'m ready to help you with salon bookings and questions. How can I assist you today?' }]
-            }
-          ],
-          generationConfig: {
-            maxOutputTokens: config.ai.max_tokens,
-            temperature: config.ai.temperature,
-          },
-          tools: tools,
+      // Always include system prompt in history to ensure AI knows to use function calls
+      // Check if system prompt is already in history
+      const hasSystemPrompt = chatHistory.some(msg => 
+        msg.role === 'user' && msg.parts && msg.parts[0] && msg.parts[0].text && 
+        msg.parts[0].text.includes('CRITICAL WORKFLOW')
+      );
+      
+      if (!hasSystemPrompt) {
+        // Prepend system prompt to history
+        chatHistory.unshift({
+          role: 'model',
+          parts: [{ text: 'I understand. I will ALWAYS use function calls when users ask for data, and then generate GenUI to display it.' }]
         });
-      } else {
-        // Continue existing conversation (system prompt already in first message)
-        chat = this.model.startChat({
-          history: chatHistory,
-          generationConfig: {
-            maxOutputTokens: config.ai.max_tokens,
-            temperature: config.ai.temperature,
-          },
-          tools: tools,
+        chatHistory.unshift({
+          role: 'user',
+          parts: [{ text: systemPrompt }]
         });
       }
+      
+      // Start chat with tools and system prompt
+      chat = this.model.startChat({
+        history: chatHistory,
+        generationConfig: {
+          maxOutputTokens: config.ai.max_tokens,
+          temperature: config.ai.temperature,
+        },
+        tools: tools,
+      });
 
+      // Detect if user is asking for bookings/salons/favorites and force function call if needed
+      const messageLower = message.toLowerCase().trim();
+      
+      // Check conversation history to see if previous messages were about bookings
+      const recentMessages = historyMessages ? historyMessages.slice(-3) : [];
+      const hasRecentBookingContext = recentMessages.some(msg => {
+        const content = (msg.content || '').toLowerCase();
+        return content.includes('boeking') || content.includes('booking') || 
+               content.includes('afspraak') || content.includes('appointment');
+      });
+      
+      const isBookingRequest = messageLower.includes('boeking') || messageLower.includes('booking') || 
+                               messageLower.includes('afspraak') || messageLower.includes('appointment') ||
+                               ((messageLower === 'ja' || messageLower === 'yes') && hasRecentBookingContext);
+      const isSalonRequest = messageLower.includes('salon') || messageLower.includes('kapper') || 
+                             messageLower.includes('hairdresser');
+      const isFavoriteRequest = messageLower.includes('favoriet') || messageLower.includes('favorite');
+      
       // Send message and handle function calls
       let result = await chat.sendMessage(message.trim());
       let response = result.response;
@@ -514,6 +583,45 @@ Remember: You have access to real user data through API calls. Use this to provi
       let currentFunctionCalls = response.functionCalls || (response.functionCall ? [response.functionCall] : []);
       let functionCallCount = 0;
       const maxFunctionCallIterations = 5; // Prevent infinite loops
+      
+      // If user asked for bookings but AI didn't make a function call, force it
+      if (isBookingRequest && (!currentFunctionCalls || currentFunctionCalls.length === 0)) {
+        // Force a function call to get bookings
+        currentFunctionCalls = [{
+          name: 'make_api_request',
+          args: {
+            method: 'GET',
+            endpoint: '/api/bookings'
+          }
+        }];
+      }
+      
+      // If user asked for salons but AI didn't make a function call, force it
+      if (isSalonRequest && (!currentFunctionCalls || currentFunctionCalls.length === 0) && latitude && longitude) {
+        currentFunctionCalls = [{
+          name: 'make_api_request',
+          args: {
+            method: 'GET',
+            endpoint: '/api/salons/nearby',
+            queryParams: {
+              lat: latitude.toString(),
+              lng: longitude.toString(),
+              max_distance: '50'
+            }
+          }
+        }];
+      }
+      
+      // If user asked for favorites but AI didn't make a function call, force it
+      if (isFavoriteRequest && (!currentFunctionCalls || currentFunctionCalls.length === 0)) {
+        currentFunctionCalls = [{
+          name: 'make_api_request',
+          args: {
+            method: 'GET',
+            endpoint: '/api/favorites'
+          }
+        }];
+      }
       
       while (currentFunctionCalls && currentFunctionCalls.length > 0 && functionCallCount < maxFunctionCallIterations) {
         functionCallCount++;
@@ -610,9 +718,20 @@ Remember: You have access to real user data through API calls. Use this to provi
       // If still no response after function calls, the model might need a follow-up
       if (!aiResponse || aiResponse.trim().length === 0) {
         if (functionCallCount > 0) {
-          // Function calls completed but no text response - request a summary
+          // Function calls completed but no text response - request a summary with GenUI
           try {
-            const followUpResult = await chat.sendMessage('Please summarize the data you retrieved and present it to the user.');
+            const messageLower = message.toLowerCase();
+            let followUpPrompt = '';
+            
+            if (messageLower.includes('booking') || messageLower.includes('boeking')) {
+              followUpPrompt = 'Je hebt de boekingen opgehaald. Geef nu een samenvatting in het Nederlands en genereer GenUI JSON om ze in een lijst weer te geven. Gebruik het beginRendering commando met een List component met Card items voor elke booking.';
+            } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
+              followUpPrompt = 'Je hebt de salons opgehaald. Geef nu een samenvatting in het Nederlands en genereer GenUI JSON om ze in een lijst weer te geven.';
+            } else {
+              followUpPrompt = 'Je hebt de data opgehaald. Geef nu een samenvatting en genereer GenUI JSON om de data visueel weer te geven.';
+            }
+            
+            const followUpResult = await chat.sendMessage(followUpPrompt);
             const followUpResponse = followUpResult.response;
             
             if (typeof followUpResponse.text === 'function') {
@@ -642,20 +761,52 @@ Remember: You have access to real user data through API calls. Use this to provi
       // The AI might include GenUI commands in its response
       let genuiMetadata = null;
       try {
-        // Try to parse GenUI commands from response
-        // Format: The AI can include JSON in its response that we'll extract
+        // Try to parse GenUI commands from response text (JSON code blocks)
         const genuiMatch = aiResponse.match(/```json\s*({[\s\S]*?})\s*```/);
         if (genuiMatch) {
           const genuiJson = JSON.parse(genuiMatch[1]);
-          if (genuiJson.command || genuiJson.surfaceId) {
-            genuiMetadata = { genui: genuiJson };
+          if (genuiJson.command || genuiJson.surfaceId || genuiJson.genui) {
+            genuiMetadata = { genui: genuiJson.genui || genuiJson };
             // Remove GenUI JSON from text response
             aiResponse = aiResponse.replace(/```json\s*{[\s\S]*?}\s*```/g, '').trim();
           }
-                }
-              } catch (e) {
-                // If parsing fails, continue without GenUI
+        }
+        
+        // Also check if GenUI is in the response text as a JSON object (without code blocks)
+        if (!genuiMetadata) {
+          const directJsonMatch = aiResponse.match(/\{[\s\S]*"genui"[\s\S]*\}/);
+          if (directJsonMatch) {
+            try {
+              const parsed = JSON.parse(directJsonMatch[0]);
+              if (parsed.genui) {
+                genuiMetadata = { genui: parsed.genui };
+                // Remove from text
+                aiResponse = aiResponse.replace(directJsonMatch[0], '').trim();
               }
+            } catch (e) {
+              // Not valid JSON, continue
+            }
+          }
+        }
+        
+        // Also check for "genui" key at root level
+        if (!genuiMetadata) {
+          const rootGenuiMatch = aiResponse.match(/\{[\s\S]*"command"[\s\S]*"surfaceId"[\s\S]*\}/);
+          if (rootGenuiMatch) {
+            try {
+              const parsed = JSON.parse(rootGenuiMatch[0]);
+              if (parsed.command || parsed.surfaceId) {
+                genuiMetadata = { genui: parsed };
+                aiResponse = aiResponse.replace(rootGenuiMatch[0], '').trim();
+              }
+            } catch (e) {
+              // Not valid JSON, continue
+            }
+          }
+        }
+      } catch (e) {
+        // If parsing fails, continue without GenUI
+      }
 
       // Save AI response
       const { data: aiMessage, error: aiMsgError } = await authenticatedClient
