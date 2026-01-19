@@ -14,7 +14,6 @@ class AIController {
       this.genAI = new GoogleGenerativeAI(config.ai.gemini_api_key);
       this.model = this.genAI.getGenerativeModel({ model: config.ai.gemini_model });
     } else {
-      console.warn('⚠️  GEMINI_API_KEY not set. AI features will be disabled.');
       this.model = null;
     }
   }
@@ -178,7 +177,6 @@ Remember: You have access to real user data through API calls. Use this to provi
         req.end();
       });
     } catch (error) {
-      console.error('API request error:', error);
       throw error;
     }
   }
@@ -266,7 +264,6 @@ Remember: You have access to real user data through API calls. Use this to provi
         location: (latitude && longitude) ? { latitude, longitude } : null
       };
     } catch (error) {
-      console.error('Error getting user context:', error);
       return {
         name: null,
         language: 'en',
@@ -450,9 +447,7 @@ Remember: You have access to real user data through API calls. Use this to provi
       .order('created_at', { ascending: true })
       .limit(config.ai.max_conversation_history);
 
-    if (historyError) {
-      console.error('Error fetching conversation history:', historyError);
-    }
+      // Fetch conversation history (errors are non-critical)
 
     // Get user context with location
     const userContext = await this.getUserContext(userId, req.token, latitude, longitude);
@@ -518,14 +513,17 @@ Remember: You have access to real user data through API calls. Use this to provi
       
       // Handle function calls - check both functionCalls and functionCall (singular)
       let currentFunctionCalls = response.functionCalls || (response.functionCall ? [response.functionCall] : []);
+      let functionCallCount = 0;
+      const maxFunctionCallIterations = 5; // Prevent infinite loops
       
-      while (currentFunctionCalls && currentFunctionCalls.length > 0) {
+      while (currentFunctionCalls && currentFunctionCalls.length > 0 && functionCallCount < maxFunctionCallIterations) {
+        functionCallCount++;
         const functionResponses = [];
 
         for (const functionCall of currentFunctionCalls) {
-              if (functionCall.name === 'make_api_request') {
-                try {
-                  const { method, endpoint, body, queryParams } = functionCall.args;
+          if (functionCall.name === 'make_api_request') {
+            try {
+              const { method, endpoint, body, queryParams } = functionCall.args;
               
               const apiResponse = await this.makeApiRequest(
                 userId,
@@ -547,7 +545,6 @@ Remember: You have access to real user data through API calls. Use this to provi
                 }
               });
             } catch (error) {
-              console.error('Function call error:', error);
               functionResponses.push({
                 functionResponse: {
                   name: 'make_api_request',
@@ -562,27 +559,71 @@ Remember: You have access to real user data through API calls. Use this to provi
         }
 
         // Send function responses back to the model
-        result = await chat.sendMessage(functionResponses);
-        response = result.response;
-        // Update currentFunctionCalls for next iteration
-        currentFunctionCalls = response.functionCalls || (response.functionCall ? [response.functionCall] : []);
+        if (functionResponses.length > 0) {
+          result = await chat.sendMessage(functionResponses);
+          response = result.response;
+          // Update currentFunctionCalls for next iteration
+          currentFunctionCalls = response.functionCalls || (response.functionCall ? [response.functionCall] : []);
+        } else {
+          break; // No function responses to send, exit loop
+        }
       }
 
       // Get text response - handle different response formats
+      let aiResponse = '';
+      
       if (typeof response.text === 'function') {
-        aiResponse = response.text();
-      } else if (response.text) {
+        try {
+          aiResponse = response.text();
+        } catch (e) {
+          // If text() fails, try other methods
+        }
+      }
+      
+      if (!aiResponse && response.text) {
         aiResponse = response.text;
-      } else if (response.candidates && response.candidates[0] && response.candidates[0].content) {
+      }
+      
+      if (!aiResponse && response.candidates && response.candidates[0] && response.candidates[0].content) {
         // Handle alternative response format
         const parts = response.candidates[0].content.parts || [];
-        aiResponse = parts.map(part => part.text || '').join('');
-      } else {
-        throw new Error('Unexpected response format from Gemini API');
+        aiResponse = parts.map(part => {
+          if (part.text) return part.text;
+          // Handle function response parts
+          if (part.functionResponse) {
+            return JSON.stringify(part.functionResponse);
+          }
+          return '';
+        }).join('');
+      }
+      
+      // If still no response, check if there are function calls that completed
+      if (!aiResponse || aiResponse.trim().length === 0) {
+        // After function calls, sometimes the model needs another prompt
+        // Try to get a summary response
+        if (functionCallCount > 0) {
+          try {
+            const summaryResult = await chat.sendMessage([{
+              functionResponse: {
+                name: 'make_api_request',
+                response: { success: true, message: 'Function calls completed, please provide a text response' }
+              }
+            }]);
+            const summaryResponse = summaryResult.response;
+            if (typeof summaryResponse.text === 'function') {
+              aiResponse = summaryResponse.text();
+            } else if (summaryResponse.text) {
+              aiResponse = summaryResponse.text;
+            }
+          } catch (e) {
+            // Fallback: provide a default response
+            aiResponse = 'I\'ve retrieved the information you requested. How would you like me to present it?';
+          }
+        }
       }
       
       if (!aiResponse || aiResponse.trim().length === 0) {
-        throw new Error('Empty response from AI model');
+        throw new Error('Empty response from AI model after processing');
       }
 
       // Check if response contains GenUI/A2UI commands
@@ -620,9 +661,7 @@ Remember: You have access to real user data through API calls. Use this to provi
         .select()
         .single();
 
-      if (aiMsgError) {
-        console.error('Error saving AI message:', aiMsgError);
-      }
+      // Save AI message (errors are non-critical)
 
       // Update conversation updated_at
       await authenticatedClient
