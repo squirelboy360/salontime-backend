@@ -45,12 +45,49 @@ ${contextInfo.length > 0 ? `User Context:\n${contextInfo.join('\n')}\n` : ''}
 IMPORTANT SECURITY: All API requests you make MUST be scoped to the current logged-in user (userId: ${userContext.userId || 'current_user'}). You CANNOT access data from other users. All requests are automatically authenticated with the user's token.
 
 Available API Endpoints (all require authentication, automatically scoped to current user):
+
+BOOKINGS:
 - GET /api/bookings - Get user's bookings (automatically filtered to current user)
-- GET /api/salons - Search/browse salons (public, but can filter by user preferences)
+- GET /api/bookings/stats - Get booking statistics for current user
+- GET /api/bookings/available-slots?salon_id={id}&service_id={id}&date={YYYY-MM-DD} - Get available time slots
+- GET /api/bookings/available-slots-count?salon_id={id}&service_id={id}&date={YYYY-MM-DD} - Get count of available slots
+- POST /api/bookings - Create a booking (body: {salon_id, service_id, appointment_date, start_time, end_time, staff_id?, client_notes?})
+- PATCH /api/bookings/{bookingId}/status - Update booking status (body: {status: 'pending'|'confirmed'|'completed'|'cancelled'|'no_show'})
+- PATCH /api/bookings/{bookingId}/reschedule - Reschedule a booking (body: {appointment_date, start_time, end_time})
+
+SALONS:
+- GET /api/salons/search?q={query}&lat={lat}&lng={lng}&max_distance={km}&min_rating={0-5}&open_now={true|false}&sort={rating|distance|name} - Search/browse salons
+- GET /api/salons/nearby?lat={lat}&lng={lng}&max_distance={km} - Get nearby salons
+- GET /api/salons/popular - Get popular salons
+- GET /api/salons/{salonId} - Get salon details by ID
+- GET /api/salons/recommendations/personalized - Get personalized salon recommendations for current user
+
+SERVICES:
 - GET /api/services?salon_id={id} - Get services for a salon
+- GET /api/services/categories - Get all service categories
+
+FAVORITES:
 - GET /api/favorites - Get user's favorite salons (automatically filtered to current user)
-- POST /api/bookings - Create a booking (automatically scoped to current user)
+- POST /api/favorites - Add salon to favorites (body: {salon_id})
+- DELETE /api/favorites/{salonId} - Remove salon from favorites
+- GET /api/favorites/check/{salonId} - Check if salon is favorited
+
+USER PROFILE:
 - GET /api/user/profile - Get current user's profile
+- PUT /api/user/profile - Update user profile (body: {first_name?, last_name?, phone?, language?, avatar_url?})
+
+REVIEWS:
+- GET /api/reviews/salon/{salonId} - Get reviews for a salon
+- GET /api/reviews/my-reviews - Get current user's reviews
+- POST /api/reviews - Create a review (body: {booking_id, salon_id, rating, comment})
+- PUT /api/reviews/{reviewId} - Update a review
+- DELETE /api/reviews/{reviewId} - Delete a review
+
+ANALYTICS:
+- GET /api/analytics/salons/{id}/analytics - Get salon analytics (salon owner only)
+- GET /api/analytics/salons/trending - Get trending salons
+- GET /api/analytics/salons/new - Get new salons
+- GET /api/analytics/salons/featured - Get featured salons
 
 When you need to make API calls:
 1. Use the "make_api_request" function tool to call these endpoints
@@ -525,6 +562,26 @@ Remember: You have access to real user data through API calls. Use this to provi
 
       aiResponse = response.text();
 
+      // Check if response contains GenUI/A2UI commands
+      // The AI might include GenUI commands in its response
+      let genuiMetadata = null;
+      try {
+        // Try to parse GenUI commands from response
+        // Format: The AI can include JSON in its response that we'll extract
+        const genuiMatch = aiResponse.match(/```json\s*({[\s\S]*?})\s*```/);
+        if (genuiMatch) {
+          const genuiJson = JSON.parse(genuiMatch[1]);
+          if (genuiJson.command || genuiJson.surfaceId) {
+            genuiMetadata = { genui: genuiJson };
+            // Remove GenUI JSON from text response
+            aiResponse = aiResponse.replace(/```json\s*{[\s\S]*?}\s*```/g, '').trim();
+          }
+        }
+      } catch (e) {
+        // If parsing fails, continue without GenUI
+        console.log('Could not parse GenUI from response:', e);
+      }
+
       // Save AI response
       const { data: aiMessage, error: aiMsgError } = await supabaseService.supabase
         .from('ai_messages')
@@ -534,7 +591,8 @@ Remember: You have access to real user data through API calls. Use this to provi
           content: aiResponse,
           metadata: {
             model: config.ai.gemini_model,
-            tokens_used: response.usageMetadata?.totalTokenCount || null
+            tokens_used: response.usageMetadata?.totalTokenCount || null,
+            ...(genuiMetadata || {})
           }
         })
         .select()
