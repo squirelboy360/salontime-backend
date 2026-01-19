@@ -97,43 +97,30 @@ CRITICAL WORKFLOW - YOU MUST FOLLOW THIS EXACTLY:
 
 When a user asks for ANY data (bookings, salons, favorites, reviews, etc.):
 1. IMMEDIATELY use make_api_request function to fetch the data - DO NOT just acknowledge
-2. After receiving data, ALWAYS generate GenUI JSON to display it visually
-3. Include GenUI JSON in your response metadata field
-4. Provide a brief text summary along with the UI
+2. After receiving data in the function response, you MUST:
+   a. Look at the actual data structure returned (it will be in response.data)
+   b. Generate GenUI JSON that uses the REAL data values from the response
+   c. Include GenUI JSON in your response (either in text as JSON code block or in metadata)
+   d. Provide a brief text summary
+3. NEVER say "no bookings" or "no data" without checking the function response data first
+4. ALWAYS use the actual data values from the API response, not placeholders
 
 MANDATORY EXAMPLES:
 
 User: "laat mij alle boekingen zien" or "show me my bookings"
 YOU MUST:
 1. Call: make_api_request(method: "GET", endpoint: "/api/bookings")
-2. After getting bookings data, generate GenUI like this in your response metadata:
-{
-  "genui": {
-    "command": "beginRendering",
-    "surfaceId": "bookings_list",
-    "content": {
-      "List": {
-        "items": [
-          {
-            "Card": {
-              "child": {
-                "Column": {
-                  "children": [
-                    {"Text": {"literalString": "Salon: [salon_name]"}},
-                    {"Text": {"literalString": "Date: [appointment_date]"}},
-                    {"Text": {"literalString": "Time: [start_time]"}},
-                    {"Button": {"label": "Details", "onPressed": {"action": "navigate"}}}
-                  ]
-                }
-              }
-            }
-          }
-        ]
-      }
-    }
-  }
-}
-3. Text response: "Hier zijn je boekingen:" (or similar)
+2. Wait for the function response - it will contain the actual booking data
+3. Look at response.data - it will be an array of bookings with fields like:
+   - salon.business_name or salon_name
+   - service.name or service_name
+   - appointment_date
+   - start_time, end_time
+   - status
+4. Generate GenUI using the ACTUAL values from the data. Use this JSON structure (replace placeholders with real data):
+   genui: { command: "beginRendering", surfaceId: "bookings_list", content: { List: { items: [ { Card: { onPressed: {action: "navigate", salonId: "actual_salon_id"}, child: { Column: { children: [ {Text: {literalString: "actual_salon_name"}}, {Text: {literalString: "actual_service_name"}}, {Text: {literalString: "actual_date - actual_time"}}, {Text: {literalString: "Status: actual_status"}} ] } } } } ] } } }
+5. Replace "actual_..." placeholders with REAL values from the function response data
+6. Text response: "Hier zijn je boekingen:" followed by the GenUI JSON
 
 User: "find salons near me" or "vind salons bij mij"
 YOU MUST:
@@ -667,10 +654,44 @@ Remember: When user asks for data, you MUST use function calling to get it, then
 
         // Send function responses back to the model
         if (functionResponses.length > 0) {
+          // Store the last function response data for GenUI generation
+          const lastResponseData = functionResponses[functionResponses.length - 1]?.functionResponse?.response?.data;
+          
           result = await chat.sendMessage(functionResponses);
           response = result.response;
           // Update currentFunctionCalls for next iteration
           currentFunctionCalls = response.functionCalls || (response.functionCall ? [response.functionCall] : []);
+          
+          // If no more function calls, ensure GenUI is generated
+          if (currentFunctionCalls.length === 0 && lastResponseData) {
+            // Check if response already has GenUI or if we need to request it
+            const responseText = typeof response.text === 'function' ? response.text() : (response.text || '');
+            const hasGenUI = responseText.includes('genui') || responseText.includes('beginRendering') || responseText.includes('```json');
+            
+            if (!hasGenUI) {
+              // Force GenUI generation with the actual data
+              const messageLower = message.toLowerCase();
+              let genuiPrompt = '';
+              
+              if (messageLower.includes('booking') || messageLower.includes('boeking')) {
+                const bookingCount = Array.isArray(lastResponseData) ? lastResponseData.length : (lastResponseData?.data?.length || 0);
+                genuiPrompt = `Je hebt ${bookingCount} boekingen opgehaald. Gebruik deze data om GenUI JSON te genereren. Maak een List component met Card items. Voor elke booking in de data, maak een Card met: salon naam, service naam, datum, tijd, en status. Gebruik de exacte data die je hebt ontvangen. Genereer de GenUI JSON nu direct in je antwoord.`;
+              } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
+                const salonCount = Array.isArray(lastResponseData) ? lastResponseData.length : (lastResponseData?.data?.length || 0);
+                genuiPrompt = `Je hebt ${salonCount} salons opgehaald. Gebruik deze data om GenUI JSON te genereren. Maak een List component met Card items voor elke salon. Genereer de GenUI JSON nu direct.`;
+              } else {
+                genuiPrompt = 'Gebruik de data die je hebt ontvangen om GenUI JSON te genereren. Maak een visuele weergave met List en Card componenten. Genereer de GenUI JSON nu direct.';
+              }
+              
+              const genuiResult = await chat.sendMessage(genuiPrompt);
+              const genuiResponse = genuiResult.response;
+              if (typeof genuiResponse.text === 'function') {
+                response.text = genuiResponse.text();
+              } else if (genuiResponse.text) {
+                response.text = genuiResponse.text;
+              }
+            }
+          }
         } else {
           break; // No function responses to send, exit loop
         }
@@ -724,11 +745,11 @@ Remember: When user asks for data, you MUST use function calling to get it, then
             let followUpPrompt = '';
             
             if (messageLower.includes('booking') || messageLower.includes('boeking')) {
-              followUpPrompt = 'Je hebt de boekingen opgehaald. Geef nu een samenvatting in het Nederlands en genereer GenUI JSON om ze in een lijst weer te geven. Gebruik het beginRendering commando met een List component met Card items voor elke booking.';
+              followUpPrompt = 'Je hebt de boekingen opgehaald. Geef nu een samenvatting in het Nederlands en genereer GenUI JSON om ze in een lijst weer te geven. Gebruik het beginRendering commando met een List component met Card items voor elke booking. Gebruik de exacte data die je hebt ontvangen.';
             } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
-              followUpPrompt = 'Je hebt de salons opgehaald. Geef nu een samenvatting in het Nederlands en genereer GenUI JSON om ze in een lijst weer te geven.';
+              followUpPrompt = 'Je hebt de salons opgehaald. Geef nu een samenvatting in het Nederlands en genereer GenUI JSON om ze in een lijst weer te geven. Gebruik de exacte data die je hebt ontvangen.';
             } else {
-              followUpPrompt = 'Je hebt de data opgehaald. Geef nu een samenvatting en genereer GenUI JSON om de data visueel weer te geven.';
+              followUpPrompt = 'Je hebt de data opgehaald. Geef nu een samenvatting en genereer GenUI JSON om de data visueel weer te geven. Gebruik de exacte data die je hebt ontvangen.';
             }
             
             const followUpResult = await chat.sendMessage(followUpPrompt);
