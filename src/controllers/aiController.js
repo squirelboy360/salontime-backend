@@ -953,18 +953,36 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
               const messageLower = message.toLowerCase();
               let htmlPrompt = '';
               
+              // Safely extract array data from response
+              let dataArray = [];
+              if (Array.isArray(lastResponseData)) {
+                dataArray = lastResponseData;
+              } else if (lastResponseData && typeof lastResponseData === 'object') {
+                // Try different possible structures
+                if (Array.isArray(lastResponseData.data)) {
+                  dataArray = lastResponseData.data;
+                } else if (Array.isArray(lastResponseData.bookings)) {
+                  dataArray = lastResponseData.bookings;
+                } else if (Array.isArray(lastResponseData.salons)) {
+                  dataArray = lastResponseData.salons;
+                } else if (lastResponseData.success && Array.isArray(lastResponseData.data)) {
+                  dataArray = lastResponseData.data;
+                }
+              }
+              
+              // Ensure we have an array before using slice
+              const safeArray = Array.isArray(dataArray) ? dataArray : [];
+              const limitedData = safeArray.slice(0, 5);
+              
               if (messageLower.includes('booking') || messageLower.includes('boeking')) {
-                const bookingCount = Array.isArray(lastResponseData) ? lastResponseData.length : (lastResponseData?.data?.length || 0);
-                const bookings = Array.isArray(lastResponseData) ? lastResponseData : (lastResponseData?.data || []);
-                htmlPrompt = `Je hebt ${bookingCount} boekingen opgehaald. Gebruik deze EXACTE data om HTML te genereren. Maak HTML cards met class="ai-card" en data-booking-id voor elke booking. Gebruik de volgende data: ${JSON.stringify(bookings.slice(0, 5))}. Wrap alles in <output> tags. Genereer de HTML NU direct in je antwoord - geen tekst, alleen HTML in <output> tags.`;
+                const bookingCount = safeArray.length;
+                htmlPrompt = `Je hebt ${bookingCount} boekingen opgehaald. Gebruik deze EXACTE data om HTML te genereren. Maak HTML cards met class="ai-card" en data-booking-id voor elke booking. Gebruik de volgende data: ${JSON.stringify(limitedData)}. Wrap alles in <output> tags. Genereer de HTML NU direct in je antwoord - geen tekst, alleen HTML in <output> tags.`;
               } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
-                const salonCount = Array.isArray(lastResponseData) ? lastResponseData.length : (lastResponseData?.data?.length || 0);
-                const salons = Array.isArray(lastResponseData) ? lastResponseData : (lastResponseData?.data || []);
-                htmlPrompt = `Je hebt ${salonCount} salons opgehaald. Gebruik deze EXACTE data om HTML te genereren. Maak HTML cards met class="ai-card" en data-salon-id voor elke salon. Gebruik de volgende data: ${JSON.stringify(salons.slice(0, 5))}. Wrap alles in <output> tags. Genereer de HTML NU direct - geen tekst, alleen HTML in <output> tags.`;
+                const salonCount = safeArray.length;
+                htmlPrompt = `Je hebt ${salonCount} salons opgehaald. Gebruik deze EXACTE data om HTML te genereren. Maak HTML cards met class="ai-card" en data-salon-id voor elke salon. Gebruik de volgende data: ${JSON.stringify(limitedData)}. Wrap alles in <output> tags. Genereer de HTML NU direct - geen tekst, alleen HTML in <output> tags.`;
               } else if (messageLower.includes('favorit') || messageLower.includes('favorite')) {
-                const favoriteCount = Array.isArray(lastResponseData) ? lastResponseData.length : (lastResponseData?.data?.length || 0);
-                const favorites = Array.isArray(lastResponseData) ? lastResponseData : (lastResponseData?.data || []);
-                htmlPrompt = `Je hebt ${favoriteCount} favorieten opgehaald. Gebruik deze EXACTE data om HTML te genereren. Maak HTML cards met class="ai-card" en data-salon-id voor elke favoriet. Gebruik de volgende data: ${JSON.stringify(favorites.slice(0, 5))}. Wrap alles in <output> tags. Genereer de HTML NU direct - geen tekst, alleen HTML in <output> tags.`;
+                const favoriteCount = safeArray.length;
+                htmlPrompt = `Je hebt ${favoriteCount} favorieten opgehaald. Gebruik deze EXACTE data om HTML te genereren. Maak HTML cards met class="ai-card" en data-salon-id voor elke favoriet. Gebruik de volgende data: ${JSON.stringify(limitedData)}. Wrap alles in <output> tags. Genereer de HTML NU direct - geen tekst, alleen HTML in <output> tags.`;
               } else {
                 htmlPrompt = `Je hebt data opgehaald. Gebruik deze EXACTE data om HTML te genereren met class="ai-card". Wrap alles in <output> tags. Genereer de HTML NU direct - geen tekst, alleen HTML in <output> tags.`;
               }
