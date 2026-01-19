@@ -102,9 +102,18 @@ const errorHandler = (err, req, res, next) => {
     }
   };
 
-  // Add stack trace in development
+  // Add stack trace and details in development
   if (!isProduction) {
     response.error.stack = error.stack;
+    if (error.originalError) {
+      response.error.originalError = error.originalError;
+    }
+    if (error.errorName) {
+      response.error.errorName = error.errorName;
+    }
+    if (error.errorCode) {
+      response.error.errorCode = error.errorCode;
+    }
   }
 
   res.status(statusCode).json(response);

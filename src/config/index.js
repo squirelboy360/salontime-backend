@@ -136,7 +136,7 @@ const config = {
   // AI Configuration (Gemini)
   ai: {
     gemini_api_key: process.env.GEMINI_API_KEY,
-    gemini_model: process.env.GEMINI_MODEL || 'gemini-pro',
+    gemini_model: process.env.GEMINI_MODEL || 'gemini-2.5-pro', // Updated to latest stable model
     max_tokens: parseInt(process.env.AI_MAX_TOKENS) || 2048,
     temperature: parseFloat(process.env.AI_TEMPERATURE) || 0.7,
     max_conversation_history: parseInt(process.env.AI_MAX_CONVERSATION_HISTORY) || 10

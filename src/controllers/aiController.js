@@ -31,6 +31,10 @@ class AIController {
       contextInfo.push(`User's preferred language: ${userContext.language}`);
     }
     
+    if (userContext.location) {
+      contextInfo.push(`User's current location: ${userContext.location.latitude}, ${userContext.location.longitude}`);
+    }
+    
     if (userContext.recentBookings && userContext.recentBookings.length > 0) {
       contextInfo.push(`Recent bookings: ${userContext.recentBookings.length} booking(s)`);
     }
@@ -181,6 +185,7 @@ Remember: You have access to real user data through API calls. Use this to provi
 
   // Get function calling tools for Gemini
   getFunctionCallingTools() {
+    // Gemini API v0.24.1 expects tools as an array
     return [
       {
         functionDeclarations: [
@@ -217,7 +222,7 @@ Remember: You have access to real user data through API calls. Use this to provi
   }
 
   // Get user context for AI
-  async getUserContext(userId, accessToken) {
+  async getUserContext(userId, accessToken, latitude = null, longitude = null) {
     try {
       // Use authenticated client for RLS
       const client = accessToken ? getAuthenticatedClient(accessToken) : supabaseAdmin;
@@ -269,7 +274,8 @@ Remember: You have access to real user data through API calls. Use this to provi
         name: userProfile ? `${userProfile.first_name} ${userProfile.last_name}` : null,
         language: userProfile?.language || 'en',
         recentBookings: recentBookings || [],
-        favoriteSalons: favoriteSalons?.map(f => f.salons) || []
+        favoriteSalons: favoriteSalons?.map(f => f.salons) || [],
+        location: (latitude && longitude) ? { latitude, longitude } : null
       };
     } catch (error) {
       console.error('Error getting user context:', error);
@@ -387,12 +393,19 @@ Remember: You have access to real user data through API calls. Use this to provi
 
   // Send message to AI
   sendMessage = asyncHandler(async (req, res) => {
+    console.log('🤖 sendMessage called');
+    console.log('🤖 Model initialized:', !!this.model);
+    console.log('🤖 GEMINI_API_KEY set:', !!config.ai.gemini_api_key);
+    
     if (!this.model) {
-      throw new AppError('AI service is not available', 503, 'AI_SERVICE_UNAVAILABLE');
+      console.error('❌ AI model not initialized');
+      throw new AppError('AI service is not available. GEMINI_API_KEY may not be set.', 503, 'AI_SERVICE_UNAVAILABLE');
     }
 
     const userId = req.user.id;
-    const { conversationId, message, newConversation } = req.body;
+    const { conversationId, message, newConversation, latitude, longitude } = req.body;
+
+    console.log('🤖 Request params:', { userId, conversationId, message: message?.substring(0, 50), newConversation, latitude, longitude });
 
     if (!message || message.trim().length === 0) {
       throw new AppError('Message is required', 400, 'MESSAGE_REQUIRED');
@@ -460,12 +473,15 @@ Remember: You have access to real user data through API calls. Use this to provi
       console.error('Error fetching conversation history:', historyError);
     }
 
-    // Get user context
-    const userContext = await this.getUserContext(userId, req.token);
+    // Get user context with location
+    const userContext = await this.getUserContext(userId, req.token, latitude, longitude);
 
     // Build chat history for Gemini
     const chatHistory = [];
     const systemPrompt = this.getSystemPrompt(userContext);
+
+    console.log('🤖 Building chat history');
+    console.log('🤖 History messages count:', historyMessages?.length || 0);
 
     // Add conversation history
     if (historyMessages && historyMessages.length > 0) {
@@ -479,53 +495,86 @@ Remember: You have access to real user data through API calls. Use this to provi
       });
     }
 
+    console.log('🤖 Chat history length:', chatHistory.length);
+    console.log('🤖 System prompt length:', systemPrompt.length);
+
     try {
       let chat;
       let aiResponse;
       const userToken = req.token; // Get user's auth token
       
+      const tools = this.getFunctionCallingTools();
+      console.log('🤖 Function calling tools:', JSON.stringify(tools, null, 2));
+      
       // If this is the first message, include system prompt in history
       if (chatHistory.length === 0) {
+        console.log('🤖 Starting new chat with system prompt');
         // First message - include system prompt as initial context
-        chat = this.model.startChat({
-          history: [
-            {
-              role: 'user',
-              parts: [{ text: systemPrompt }]
+        try {
+          chat = this.model.startChat({
+            history: [
+              {
+                role: 'user',
+                parts: [{ text: systemPrompt }]
+              },
+              {
+                role: 'model',
+                parts: [{ text: 'I understand. I\'m ready to help you with salon bookings and questions. How can I assist you today?' }]
+              }
+            ],
+            generationConfig: {
+              maxOutputTokens: config.ai.max_tokens,
+              temperature: config.ai.temperature,
             },
-            {
-              role: 'model',
-              parts: [{ text: 'I understand. I\'m ready to help you with salon bookings and questions. How can I assist you today?' }]
-            }
-          ],
-          generationConfig: {
-            maxOutputTokens: config.ai.max_tokens,
-            temperature: config.ai.temperature,
-          },
-          tools: this.getFunctionCallingTools(),
-        });
+            tools: tools,
+          });
+          console.log('✅ Chat started successfully');
+        } catch (chatError) {
+          console.error('❌ Error starting chat:', chatError);
+          throw chatError;
+        }
       } else {
+        console.log('🤖 Continuing existing conversation');
         // Continue existing conversation (system prompt already in first message)
-        chat = this.model.startChat({
-          history: chatHistory,
-          generationConfig: {
-            maxOutputTokens: config.ai.max_tokens,
-            temperature: config.ai.temperature,
-          },
-          tools: this.getFunctionCallingTools(),
-        });
+        try {
+          chat = this.model.startChat({
+            history: chatHistory,
+            generationConfig: {
+              maxOutputTokens: config.ai.max_tokens,
+              temperature: config.ai.temperature,
+            },
+            tools: tools,
+          });
+          console.log('✅ Chat started successfully');
+        } catch (chatError) {
+          console.error('❌ Error starting chat:', chatError);
+          throw chatError;
+        }
       }
 
-      // Send message and handle function calls
-      let result = await chat.sendMessage(message.trim());
-      let response = result.response;
+      console.log('🤖 Sending message to Gemini:', message.trim().substring(0, 100));
       
-      // Handle function calls
-      while (response.functionCalls && response.functionCalls.length > 0) {
-        const functionCalls = response.functionCalls;
+      // Send message and handle function calls
+      let result;
+      try {
+        result = await chat.sendMessage(message.trim());
+        console.log('✅ Message sent, got result');
+      } catch (sendError) {
+        console.error('❌ Error sending message:', sendError);
+        throw sendError;
+      }
+      
+      let response = result.response;
+      console.log('🤖 Response received, type:', typeof response);
+      console.log('🤖 Response keys:', response ? Object.keys(response) : 'null');
+      
+      // Handle function calls - check both functionCalls and functionCall (singular)
+      let currentFunctionCalls = response.functionCalls || (response.functionCall ? [response.functionCall] : []);
+      
+      while (currentFunctionCalls && currentFunctionCalls.length > 0) {
         const functionResponses = [];
 
-        for (const functionCall of functionCalls) {
+        for (const functionCall of currentFunctionCalls) {
           if (functionCall.name === 'make_api_request') {
             try {
               const { method, endpoint, body, queryParams } = functionCall.args;
@@ -568,9 +617,30 @@ Remember: You have access to real user data through API calls. Use this to provi
         // Send function responses back to the model
         result = await chat.sendMessage(functionResponses);
         response = result.response;
+        // Update currentFunctionCalls for next iteration
+        currentFunctionCalls = response.functionCalls || (response.functionCall ? [response.functionCall] : []);
       }
 
-      aiResponse = response.text();
+      // Get text response - handle different response formats
+      if (typeof response.text === 'function') {
+        aiResponse = response.text();
+      } else if (response.text) {
+        aiResponse = response.text;
+      } else if (response.candidates && response.candidates[0] && response.candidates[0].content) {
+        // Handle alternative response format
+        const parts = response.candidates[0].content.parts || [];
+        aiResponse = parts.map(part => part.text || '').join('');
+      } else {
+        console.error('❌ Unexpected response format:', JSON.stringify(response, null, 2));
+        throw new Error('Unexpected response format from Gemini API');
+      }
+      
+      if (!aiResponse || aiResponse.trim().length === 0) {
+        console.error('❌ Empty response from Gemini');
+        throw new Error('Empty response from AI model');
+      }
+      
+      console.log('✅ AI response received:', aiResponse.substring(0, 100) + '...');
 
       // Check if response contains GenUI/A2UI commands
       // The AI might include GenUI commands in its response
@@ -630,26 +700,61 @@ Remember: You have access to real user data through API calls. Use this to provi
         }
       });
     } catch (error) {
-      console.error('Gemini API error:', error);
+      console.error('❌ Gemini API error:', error);
+      console.error('❌ Error stack:', error.stack);
+      console.error('❌ Error details:', {
+        message: error.message,
+        name: error.name,
+        code: error.code,
+        cause: error.cause,
+        response: error.response
+      });
+      
+      // Check if model is initialized
+      if (!this.model) {
+        console.error('❌ Gemini model not initialized - check GEMINI_API_KEY');
+        throw new AppError(
+          'AI service is not available. Please check server configuration.',
+          503,
+          'AI_SERVICE_UNAVAILABLE'
+        );
+      }
       
       // Save error message
-      const authenticatedClient = getAuthenticatedClient(req.token);
-      const { data: errorMessage } = await authenticatedClient
-        .from('ai_messages')
-        .insert({
-          conversation_id: currentConversationId,
-          role: 'assistant',
-          content: 'I apologize, but I encountered an error processing your request. Please try again.',
-          metadata: { error: error.message }
-        })
-        .select()
-        .single();
+      try {
+        const authenticatedClient = getAuthenticatedClient(req.token);
+        const { data: errorMessage } = await authenticatedClient
+          .from('ai_messages')
+          .insert({
+            conversation_id: currentConversationId,
+            role: 'assistant',
+            content: `I apologize, but I encountered an error: ${error.message || 'Unknown error'}. Please try again.`,
+            metadata: { 
+              error: error.message,
+              errorName: error.name,
+              errorCode: error.code
+            }
+          })
+          .select()
+          .single();
+      } catch (saveError) {
+        console.error('❌ Failed to save error message:', saveError);
+      }
 
+      // Return more detailed error to help debugging
+      const errorMessage = error.message || 'Unknown error';
+      const errorDetails = {
+        originalError: errorMessage,
+        errorName: error.name,
+        errorCode: error.code,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      };
+      
       throw new AppError(
-        'Failed to get AI response',
+        `Failed to get AI response: ${errorMessage}`,
         500,
         'AI_RESPONSE_ERROR',
-        { originalError: error.message }
+        errorDetails
       );
     }
   });
