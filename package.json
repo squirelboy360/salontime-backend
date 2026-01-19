@@ -29,6 +29,7 @@
     "node-fetch": "^3.3.2",
     "nodemailer": "^6.9.7",
     "pg": "^8.11.3",
+    "redis": "^4.6.10",
     "socket.io": "^4.7.2",
     "stripe": "^13.10.0",
     "stripe-cli": "^0.1.0",

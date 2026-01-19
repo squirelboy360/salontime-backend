@@ -303,14 +303,18 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
   }
 
   // Get function calling tools for Gemini
-  getFunctionCallingTools() {
+  getFunctionCallingTools(userContext = null) {
     // Gemini API v0.24.1 expects tools as an array
+    const locationInfo = userContext?.location 
+      ? `lat=${userContext.location.latitude}, lng=${userContext.location.longitude}` 
+      : 'not provided';
+    
     return [
       {
         functionDeclarations: [
           {
             name: 'make_api_request',
-            description: `Use this function whenever you need to fetch information to answer a user's question. This is your way of "looking things up" - use it naturally whenever you need data. Examples: when users ask about their bookings, want to see salons, need service information, want to check favorites, etc. The user's location is available: ${userContext.location ? `lat=${userContext.location.latitude}, lng=${userContext.location.longitude}` : 'not provided'}. All requests are automatically authenticated and scoped to the current user.`,
+            description: `Use this function whenever you need to fetch information to answer a user's question. This is your way of "looking things up" - use it naturally whenever you need data. Examples: when users ask about their bookings, want to see salons, need service information, want to check favorites, etc. The user's location is available: ${locationInfo}. All requests are automatically authenticated and scoped to the current user.`,
             parameters: {
               type: 'OBJECT',
               properties: {
@@ -607,7 +611,7 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
       let chat;
       const userToken = req.token; // Get user's auth token
       
-      const tools = this.getFunctionCallingTools();
+      const tools = this.getFunctionCallingTools(userContext);
       
       // Always include system prompt in history to ensure AI knows to use function calls
       // Check if system prompt is already in history
