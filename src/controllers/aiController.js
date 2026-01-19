@@ -679,6 +679,48 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
         console.log(`📍 Location available: lat=${latitude}, lng=${longitude}`);
       }
       
+      // PROACTIVE: Force function calls BEFORE sending to AI if it's clearly a data request
+      // This ensures the AI gets the data it needs to answer properly
+      let shouldForceFunctionCall = false;
+      let forcedFunctionCall = null;
+      
+      if (isSalonRequest && latitude && longitude) {
+        shouldForceFunctionCall = true;
+        forcedFunctionCall = {
+          name: 'make_api_request',
+          args: {
+            method: 'GET',
+            endpoint: '/api/salons/nearby',
+            queryParams: {
+              lat: latitude.toString(),
+              lng: longitude.toString(),
+              max_distance: '50'
+            }
+          }
+        };
+        console.log(`🔍 Proactively forcing salon search with location: lat=${latitude}, lng=${longitude}`);
+      } else if (isBookingRequest) {
+        shouldForceFunctionCall = true;
+        forcedFunctionCall = {
+          name: 'make_api_request',
+          args: {
+            method: 'GET',
+            endpoint: '/api/bookings'
+          }
+        };
+        console.log(`🔍 Proactively forcing bookings fetch`);
+      } else if (isFavoriteRequest) {
+        shouldForceFunctionCall = true;
+        forcedFunctionCall = {
+          name: 'make_api_request',
+          args: {
+            method: 'GET',
+            endpoint: '/api/favorites'
+          }
+        };
+        console.log(`🔍 Proactively forcing favorites fetch`);
+      }
+      
       // Send the current user message to Gemini
       // Note: The current user message is NOT in chatHistory, we send it now
       console.log(`💬 Sending current message to Gemini: "${message.substring(0, 50)}..."`);
@@ -690,63 +732,72 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
       let functionCallCount = 0;
       const maxFunctionCallIterations = 5; // Prevent infinite loops
       
+      // If we proactively forced a function call and AI didn't make one, use our forced call
+      if (shouldForceFunctionCall && (!currentFunctionCalls || currentFunctionCalls.length === 0) && forcedFunctionCall) {
+        console.log(`⚠️ AI didn't make function call, using proactive fallback`);
+        currentFunctionCalls = [forcedFunctionCall];
+      }
+      
       // Fallback: Only force function calls if AI didn't make any AND the response suggests it should have
       // This is a safety net, but the AI should naturally use function calling based on the improved prompt
-      const responseText = (response.text && typeof response.text === 'function') ? response.text() : (response.text || '');
-      const responseLower = responseText.toLowerCase();
-      const seemsLikeDataRequest = responseLower.includes("couldn't find") || 
-                                   responseLower.includes("don't have") ||
-                                   responseLower.includes("i can help") ||
-                                   responseLower.includes("how can i help");
-      
-      // Only force if AI didn't make a function call AND the response suggests it should have fetched data
-      if ((!currentFunctionCalls || currentFunctionCalls.length === 0) && seemsLikeDataRequest) {
-        if (isBookingRequest) {
-          console.log(`⚠️ AI didn't fetch bookings but should have - forcing as fallback`);
-          currentFunctionCalls = [{
-            name: 'make_api_request',
-            args: {
-              method: 'GET',
-              endpoint: '/api/bookings'
-            }
-          }];
-        } else if (isSalonRequest) {
-          if (latitude && longitude) {
-            console.log(`⚠️ AI didn't fetch salons but should have - forcing as fallback with location: lat=${latitude}, lng=${longitude}`);
+      if ((!currentFunctionCalls || currentFunctionCalls.length === 0)) {
+        const responseText = (response.text && typeof response.text === 'function') ? response.text() : (response.text || '');
+        const responseLower = responseText.toLowerCase();
+        const seemsLikeDataRequest = responseLower.includes("couldn't find") || 
+                                     responseLower.includes("don't have") ||
+                                     responseLower.includes("i can help") ||
+                                     responseLower.includes("how can i help") ||
+                                     responseLower.includes("would you like me to search");
+        
+        // Only force if AI didn't make a function call AND the response suggests it should have fetched data
+        if (seemsLikeDataRequest) {
+          if (isBookingRequest) {
+            console.log(`⚠️ AI didn't fetch bookings but should have - forcing as fallback`);
             currentFunctionCalls = [{
               name: 'make_api_request',
               args: {
                 method: 'GET',
-                endpoint: '/api/salons/nearby',
-                queryParams: {
-                  lat: latitude.toString(),
-                  lng: longitude.toString(),
-                  max_distance: '50'
-                }
+                endpoint: '/api/bookings'
               }
             }];
-          } else {
-            console.log(`⚠️ AI didn't fetch salons but should have - forcing as fallback without location`);
+          } else if (isSalonRequest) {
+            if (latitude && longitude) {
+              console.log(`⚠️ AI didn't fetch salons but should have - forcing as fallback with location: lat=${latitude}, lng=${longitude}`);
+              currentFunctionCalls = [{
+                name: 'make_api_request',
+                args: {
+                  method: 'GET',
+                  endpoint: '/api/salons/nearby',
+                  queryParams: {
+                    lat: latitude.toString(),
+                    lng: longitude.toString(),
+                    max_distance: '50'
+                  }
+                }
+              }];
+            } else {
+              console.log(`⚠️ AI didn't fetch salons but should have - forcing as fallback without location`);
+              currentFunctionCalls = [{
+                name: 'make_api_request',
+                args: {
+                  method: 'GET',
+                  endpoint: '/api/salons/search',
+                  queryParams: {
+                    sort: 'rating'
+                  }
+                }
+              }];
+            }
+          } else if (isFavoriteRequest) {
+            console.log(`⚠️ AI didn't fetch favorites but should have - forcing as fallback`);
             currentFunctionCalls = [{
               name: 'make_api_request',
               args: {
                 method: 'GET',
-                endpoint: '/api/salons/search',
-                queryParams: {
-                  sort: 'rating'
-                }
+                endpoint: '/api/favorites'
               }
             }];
           }
-        } else if (isFavoriteRequest) {
-          console.log(`⚠️ AI didn't fetch favorites but should have - forcing as fallback`);
-          currentFunctionCalls = [{
-            name: 'make_api_request',
-            args: {
-              method: 'GET',
-              endpoint: '/api/favorites'
-            }
-          }];
         }
       }
       
