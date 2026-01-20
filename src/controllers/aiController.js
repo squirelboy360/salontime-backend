@@ -83,7 +83,7 @@ REVIEWS:
 - GET /api/reviews/my-reviews - Get current user's reviews
 - POST /api/reviews - Create a review
 
-When users ask questions, you MUST use make_api_request to fetch relevant data FIRST. Never respond with generic messages like "Ik heb je verzoek verwerkt" - always show the actual data.
+CRITICAL: When users ask questions, you MUST call make_api_request FIRST before responding. NEVER say "Ik heb je verzoek verwerkt" or "Hoe kan ik je verder helpen" - these responses are FORBIDDEN. You MUST show the actual data after fetching it.
 
 After fetching data, decide how to display it:
 
@@ -631,6 +631,22 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in 
       // Store functionResponses outside the loop so we can access it later
       let allFunctionResponses = [];
       
+      // If there are function calls, ignore any initial text response - we'll get the final response after function calls complete
+      let initialTextResponse = '';
+      if (currentFunctionCalls.length > 0) {
+        // Extract initial text but don't use it yet - wait for function calls to complete
+        try {
+          if (typeof response.text === 'function') {
+            initialTextResponse = response.text();
+          } else if (response.text) {
+            initialTextResponse = response.text;
+          }
+        } catch (e) {
+          // Ignore
+        }
+        console.log('🔍 Initial function calls detected:', currentFunctionCalls.length, '- Ignoring initial text response:', initialTextResponse.substring(0, 100));
+      }
+      
       console.log('🔍 Initial function calls:', currentFunctionCalls.length);
       
       while (currentFunctionCalls && currentFunctionCalls.length > 0 && functionCallCount < maxFunctionCallIterations) {
@@ -638,8 +654,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in 
         console.log(`🔄 Function call iteration ${functionCallCount}, calls: ${currentFunctionCalls.length}`);
         const functionResponses = [];
         
-        // Store functionResponses in the outer scope for later use
-        allFunctionResponses = [];
+        // Don't reset allFunctionResponses - we need to accumulate across iterations
 
         for (const functionCall of currentFunctionCalls) {
           if (functionCall.name === 'make_api_request') {
@@ -792,18 +807,35 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
       
       // If still no response after function calls, the model might need a follow-up
       // Also check if response is generic and needs context
+      const responseLower = aiResponse.toLowerCase();
       const isGenericResponse = !aiResponse || aiResponse.trim().length === 0 || 
-          (aiResponse.toLowerCase().includes('verwerkt') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
-          (aiResponse.toLowerCase().includes('processed') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
-          (aiResponse.toLowerCase().includes('hoe kan ik') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
-          (aiResponse.toLowerCase().includes('how can i') && !aiResponse.includes('<output>') && !aiResponse.includes('**'));
+          (responseLower.includes('verwerkt') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
+          (responseLower.includes('processed') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
+          (responseLower.includes('hoe kan ik') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
+          (responseLower.includes('how can i') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
+          (responseLower.includes('hoe kan ik je verder helpen') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
+          (responseLower.includes('how can i help you') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
+          (responseLower.trim() === 'ik heb je verzoek verwerkt. hoe kan ik je verder helpen?' && !aiResponse.includes('<output>') && !aiResponse.includes('**'));
       
       console.log('🔍 Checking response:', {
         isGeneric: isGenericResponse,
         functionCallCount,
         responseLength: aiResponse.length,
-        responsePreview: aiResponse.substring(0, 100)
+        responsePreview: aiResponse.substring(0, 100),
+        hasOutput: aiResponse.includes('<output>'),
+        hasMarkdown: aiResponse.includes('**'),
+        allFunctionResponsesCount: allFunctionResponses.length
       });
+      
+      // If we have function calls but got a generic response, log more details
+      if (isGenericResponse && functionCallCount > 0) {
+        console.log('⚠️ WARNING: Generic response detected after', functionCallCount, 'function call iterations');
+        console.log('📦 Available function responses:', allFunctionResponses.length);
+        if (allFunctionResponses.length > 0) {
+          const lastResponse = allFunctionResponses[allFunctionResponses.length - 1];
+          console.log('📦 Last function response structure:', JSON.stringify(Object.keys(lastResponse || {})).substring(0, 200));
+        }
+      }
       
       if (isGenericResponse && functionCallCount > 0) {
         // Function calls completed but response is generic - force display of data
