@@ -455,10 +455,14 @@ class AuthController {
     }
 
     const emailTrimmed = email.toLowerCase().trim();
-    const redirectTo = process.env.PASSWORD_RESET_REDIRECT_URL || process.env.FRONTEND_URL;
+    // Use a proper deep link so the app can show "Set new password". Must be a full URL.
+    let redirectTo = process.env.PASSWORD_RESET_REDIRECT_URL || null;
+    if (!redirectTo || !String(redirectTo).includes('://')) {
+      redirectTo = 'salontime://auth/reset-password';
+    }
 
     try {
-      const options = redirectTo ? { redirectTo } : {};
+      const options = { redirectTo };
       const { error } = await supabase.auth.resetPasswordForEmail(emailTrimmed, options);
 
       if (error) {
@@ -473,6 +477,33 @@ class AuthController {
     } catch (e) {
       if (e instanceof AppError) throw e;
       throw new AppError('Failed to send password reset email', 500, 'RESET_FAILED');
+    }
+  });
+
+  // Confirm password reset (set new password after following the email link)
+  confirmPasswordReset = asyncHandler(async (req, res) => {
+    const { access_token, refresh_token, new_password } = req.body;
+
+    if (!access_token || !refresh_token || !new_password) {
+      throw new AppError('access_token, refresh_token, and new_password are required', 400, 'MISSING_FIELDS');
+    }
+    if (typeof new_password !== 'string' || new_password.length < 6) {
+      throw new AppError('Password must be at least 6 characters', 400, 'PASSWORD_TOO_SHORT');
+    }
+
+    try {
+      const { error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token });
+      if (sessionError) {
+        throw new AppError('Invalid or expired reset link. Please request a new one.', 400, 'INVALID_RESET_LINK');
+      }
+      const { error: updateError } = await supabase.auth.updateUser({ password: new_password });
+      if (updateError) {
+        throw new AppError(updateError.message || 'Failed to update password', 400, 'UPDATE_FAILED');
+      }
+      res.status(200).json({ success: true, message: 'Password updated successfully. You can sign in with your new password.' });
+    } catch (e) {
+      if (e instanceof AppError) throw e;
+      throw new AppError('Failed to update password', 500, 'CONFIRM_RESET_FAILED');
     }
   });
 

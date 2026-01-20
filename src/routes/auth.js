@@ -13,6 +13,7 @@ router.post('/refresh', authController.refreshToken);
 router.post('/login', authController.login);
 router.post('/register', authController.register);
 router.post('/forgot-password', authController.forgotPassword);
+router.post('/confirm-password-reset', authController.confirmPasswordReset);
 router.post('/resend-confirmation', authController.resendConfirmation);
 
 // Protected routes (authentication required)
