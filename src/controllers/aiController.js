@@ -44,6 +44,8 @@ class AIController {
 
     return `You are an AI assistant for SalonTime, a salon booking platform. You have access to the user's data through API endpoints using the make_api_request function.
 
+CRITICAL: When users ask about their bookings, salons, or any data, you MUST use make_api_request to fetch the data FIRST before responding. Never say "Ik heb je verzoek verwerkt" or "I processed your request" without actually showing the data.
+
 ${contextInfo.length > 0 ? `Current User Context:\n${contextInfo.join('\n')}\n` : ''}
 
 Available API Endpoints (all require authentication, automatically scoped to current user):
@@ -81,7 +83,9 @@ REVIEWS:
 - GET /api/reviews/my-reviews - Get current user's reviews
 - POST /api/reviews - Create a review
 
-When users ask questions, use make_api_request to fetch relevant data. After fetching data, decide how to display it:
+When users ask questions, you MUST use make_api_request to fetch relevant data FIRST. Never respond with generic messages like "Ik heb je verzoek verwerkt" - always show the actual data.
+
+After fetching data, decide how to display it:
 
 1. **For structured data (bookings, salons, lists, cards)**: Use HTML in <output> tags with these CSS classes:
    - class="ai-card" for clickable cards
@@ -624,11 +628,18 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in 
       let functionCallCount = 0;
       const maxFunctionCallIterations = 5; // Prevent infinite loops
       
-        // Trust the LLM - no hardcoded forcing. Let it decide when to use APIs naturally.
+      // Store functionResponses outside the loop so we can access it later
+      let allFunctionResponses = [];
+      
+      console.log('🔍 Initial function calls:', currentFunctionCalls.length);
       
       while (currentFunctionCalls && currentFunctionCalls.length > 0 && functionCallCount < maxFunctionCallIterations) {
         functionCallCount++;
+        console.log(`🔄 Function call iteration ${functionCallCount}, calls: ${currentFunctionCalls.length}`);
         const functionResponses = [];
+        
+        // Store functionResponses in the outer scope for later use
+        allFunctionResponses = [];
 
         for (const functionCall of currentFunctionCalls) {
           if (functionCall.name === 'make_api_request') {
@@ -670,11 +681,16 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in 
 
         // Send function responses back to the model
         if (functionResponses.length > 0) {
+          // Store all function responses for later use (accumulate across iterations)
+          allFunctionResponses = [...allFunctionResponses, ...functionResponses];
+          
           // Store the last function response data for HTML/UI generation
           const lastFunctionResponse = functionResponses[functionResponses.length - 1];
           const lastResponseData = lastFunctionResponse?.functionResponse?.response?.data;
           // Store for later use in follow-up prompts
           functionResponses._lastData = lastResponseData;
+          
+          console.log('📊 Function response received, data keys:', lastResponseData ? Object.keys(lastResponseData) : 'no data');
           
           result = await chat.sendMessage(functionResponses);
           response = result.response;
@@ -782,15 +798,31 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
           (aiResponse.toLowerCase().includes('hoe kan ik') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
           (aiResponse.toLowerCase().includes('how can i') && !aiResponse.includes('<output>') && !aiResponse.includes('**'));
       
+      console.log('🔍 Checking response:', {
+        isGeneric: isGenericResponse,
+        functionCallCount,
+        responseLength: aiResponse.length,
+        responsePreview: aiResponse.substring(0, 100)
+      });
+      
       if (isGenericResponse && functionCallCount > 0) {
         // Function calls completed but response is generic - force display of data
+        console.log('⚠️ Generic response detected after function calls, forcing data display');
         let responseData = null;
         let dataArray = [];
         
         try {
           // Get the actual data from function responses
-          const lastFunctionResponse = functionResponses[functionResponses.length - 1];
+          if (allFunctionResponses.length === 0) {
+            console.error('❌ No function responses available for follow-up!');
+            throw new Error('No function responses available');
+          }
+          const lastFunctionResponse = allFunctionResponses[allFunctionResponses.length - 1];
           responseData = lastFunctionResponse?.functionResponse?.response?.data;
+          
+          console.log('📦 Last function response data structure:', responseData ? (Array.isArray(responseData) ? `Array(${responseData.length})` : typeof responseData) : 'null');
+          
+          console.log('📦 Extracted response data:', responseData ? (Array.isArray(responseData) ? `Array(${responseData.length})` : Object.keys(responseData)) : 'null');
           
           // Handle different response structures
           if (responseData && typeof responseData === 'object') {
