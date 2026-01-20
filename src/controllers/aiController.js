@@ -44,7 +44,16 @@ class AIController {
 
     return `You are an AI assistant for SalonTime, a salon booking platform. You have access to the user's data through API endpoints using the make_api_request function.
 
-CRITICAL: When users ask about their bookings, salons, or any data, you MUST use make_api_request to fetch the data FIRST before responding. Never say "Ik heb je verzoek verwerkt" or "I processed your request" without actually showing the data.
+CRITICAL RULES - YOU MUST FOLLOW THESE (VIOLATION WILL CAUSE ERRORS):
+1. When users ask about bookings, salons, appointments, or ANY data query, you MUST call make_api_request FIRST. DO NOT respond with text until you have fetched the data.
+2. NEVER respond with "Ik heb je verzoek verwerkt", "I processed your request", "Hoe kan ik je verder helpen", or "How can I help you" - these responses are STRICTLY FORBIDDEN and will be rejected.
+3. After calling make_api_request and receiving data, you MUST display the actual data in your response using HTML (<output> tags) or Markdown format. Show the data, not a generic message.
+4. If a user asks "Show me my bookings" or "Show me all my bookings", you MUST:
+   - Call make_api_request with GET /api/bookings FIRST
+   - Wait for the response
+   - Display the bookings data in HTML or Markdown
+   - DO NOT say "Ik heb je verzoek verwerkt" - show the actual bookings
+5. If you respond with text before making function calls for a data query, your response will be rejected and you will be forced to make the function call.
 
 ${contextInfo.length > 0 ? `Current User Context:\n${contextInfo.join('\n')}\n` : ''}
 
@@ -649,6 +658,40 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in 
       
       console.log('🔍 Initial function calls:', currentFunctionCalls.length);
       
+      // CRITICAL: If user asks for data but AI didn't make function calls, force it
+      const messageLowerForced = message.toLowerCase();
+      const isDataQueryForced = messageLowerForced.includes('booking') || messageLowerForced.includes('boeking') || 
+                          messageLowerForced.includes('show me') || messageLowerForced.includes('toon') ||
+                          messageLowerForced.includes('salon') || messageLowerForced.includes('kapper') ||
+                          messageLowerForced.includes('gepland') || messageLowerForced.includes('appointment') ||
+                          messageLowerForced.includes('vandaag') || messageLowerForced.includes('today');
+      
+      if (isDataQueryForced && currentFunctionCalls.length === 0) {
+        console.log('⚠️ Data query detected but NO function calls made! Forcing function call...');
+        
+        // Determine which endpoint to call based on the query
+        let forcedEndpoint = '/api/bookings';
+        if (messageLowerForced.includes('salon') || messageLowerForced.includes('kapper')) {
+          forcedEndpoint = '/api/salons/nearby';
+        } else if (messageLowerForced.includes('booking') || messageLowerForced.includes('boeking') || messageLowerForced.includes('gepland')) {
+          forcedEndpoint = '/api/bookings';
+        }
+        
+        // Create a forced function call
+        const forcedFunctionCall = {
+          name: 'make_api_request',
+          args: {
+            method: 'GET',
+            endpoint: forcedEndpoint,
+            body: null,
+            queryParams: {}
+          }
+        };
+        
+        currentFunctionCalls = [forcedFunctionCall];
+        console.log('🔧 Forced function call created:', forcedEndpoint);
+      }
+      
       while (currentFunctionCalls && currentFunctionCalls.length > 0 && functionCallCount < maxFunctionCallIterations) {
         functionCallCount++;
         console.log(`🔄 Function call iteration ${functionCallCount}, calls: ${currentFunctionCalls.length}`);
@@ -769,15 +812,95 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
       // Get text response - handle different response formats
       let aiResponse = '';
       
-      // Try multiple ways to extract text from response
-      try {
-        if (typeof response.text === 'function') {
-          aiResponse = response.text();
-        } else if (response.text && typeof response.text === 'string') {
-          aiResponse = response.text;
+      // CRITICAL: If user asked for data but no function calls were made, force them now
+      const messageLowerCheck = message.toLowerCase();
+      const isDataQuery = messageLowerCheck.includes('booking') || messageLowerCheck.includes('boeking') || 
+                          messageLowerCheck.includes('show me') || messageLowerCheck.includes('toon') ||
+                          messageLowerCheck.includes('salon') || messageLowerCheck.includes('kapper') ||
+                          messageLowerCheck.includes('gepland') || messageLowerCheck.includes('appointment') ||
+                          messageLowerCheck.includes('vandaag') || messageLowerCheck.includes('today');
+      
+      if (isDataQuery && functionCallCount === 0) {
+        console.log('🚨 CRITICAL: Data query detected but NO function calls made! Forcing function call...');
+        
+        // Determine which endpoint to call
+        let forcedEndpoint = '/api/bookings';
+        if (messageLowerCheck.includes('salon') || messageLowerCheck.includes('kapper')) {
+          forcedEndpoint = '/api/salons/nearby';
+        } else if (messageLowerCheck.includes('booking') || messageLowerCheck.includes('boeking') || messageLowerCheck.includes('gepland')) {
+          forcedEndpoint = '/api/bookings';
         }
-      } catch (e) {
-        // Continue to try other methods
+        
+        // Make the forced function call
+        try {
+          const apiResponse = await this.makeApiRequest(
+            userId,
+            userToken,
+            'GET',
+            forcedEndpoint,
+            null,
+            {}
+          );
+          
+          // Store the response
+          allFunctionResponses = [{
+            functionResponse: {
+              name: 'make_api_request',
+              response: {
+                success: apiResponse.success,
+                status: apiResponse.status,
+                data: apiResponse.data
+              }
+            }
+          }];
+          
+          console.log('✅ Forced function call completed, data received:', apiResponse.data ? (Array.isArray(apiResponse.data) ? `Array(${apiResponse.data.length})` : typeof apiResponse.data) : 'null');
+          
+          // Now force the AI to display the data
+          const lastResponseData = apiResponse.data;
+          let dataArray = [];
+          if (Array.isArray(lastResponseData)) {
+            dataArray = lastResponseData;
+          } else if (lastResponseData && typeof lastResponseData === 'object') {
+            if (Array.isArray(lastResponseData.data)) {
+              dataArray = lastResponseData.data;
+            } else if (Array.isArray(lastResponseData.bookings)) {
+              dataArray = lastResponseData.bookings;
+            } else if (Array.isArray(lastResponseData.salons)) {
+              dataArray = lastResponseData.salons;
+            }
+          }
+          
+          // Force HTML generation with the data
+          const followUpPrompt = `De gebruiker vroeg: "${message}". Je hebt de data opgehaald: ${JSON.stringify(dataArray.slice(0, 10))}. 
+
+JE MOET NU DE DATA TONEN. Gebruik HTML in <output> tags met ai-card elementen. Toon de data, niet een generieke boodschap.`;
+
+          const htmlResult = await chat.sendMessage(followUpPrompt);
+          const htmlResponse = htmlResult.response;
+          if (typeof htmlResponse.text === 'function') {
+            aiResponse = htmlResponse.text();
+          } else if (htmlResponse.text) {
+            aiResponse = htmlResponse.text;
+          }
+          
+          functionCallCount = 1; // Mark that we made a function call
+        } catch (error) {
+          console.error('❌ Forced function call failed:', error);
+        }
+      }
+      
+      // Try multiple ways to extract text from response
+      if (!aiResponse) {
+        try {
+          if (typeof response.text === 'function') {
+            aiResponse = response.text();
+          } else if (response.text && typeof response.text === 'string') {
+            aiResponse = response.text;
+          }
+        } catch (e) {
+          // Continue to try other methods
+        }
       }
       
       // Try candidates format
