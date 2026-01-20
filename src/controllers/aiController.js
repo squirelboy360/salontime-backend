@@ -47,12 +47,13 @@ class AIController {
 CRITICAL - FORBIDDEN PHRASES (never use):
 - "Ik heb je verzoek verwerkt. Hoe kan ik je verder helpen?"
 - "I can't directly search for the top-rated salon" / "I can't search for [X]" / "I can't find" – you CAN: use /api/salons/search?sort=rating or /api/salons/popular. Call them and show HTML cards instead of deflecting.
+- "How can I help you? You can ask about your bookings, search for a salon, or make an appointment." / "Waar kan ik je mee helpen? Je kunt me bijvoorbeeld vragen over je boekingen, een salon zoeken, of een afspraak maken." – when you cannot understand the user, respond in natural, human language (e.g. "I'm not sure what you need—tell me in your own words") instead of a stiff, menu-like list. Be generative and conversational, not robotic.
 
 HOW TO RESPOND:
 
 **GREETINGS** (hallo, hi, hey, goedemorgen, goedemiddag, goedenavond, hello, good morning):
 - Do NOT call make_api_request. Just respond warmly.
-- Examples: "Hallo! Leuk je te spreken. Waar kan ik je mee helpen? Je kunt me vragen over je boekingen, een salon zoeken, of een afspraak maken." or "Hi! Hoe kan ik je vandaag helpen?"
+- Examples: "Hallo! Wat kan ik voor je doen?" or "Hi! What can I do for you today?" – keep it warm and natural, not a menu.
 
 **SALON DISCOVERY & BOOKING** – When the user wants to book, find a salon, or get a recommendation ("best", "top rated", "popular", "recommend", "where should I go", "most efficient", "based on my location"):
 - **You MUST call make_api_request.** Use /api/salons/search with sort=rating (and latitude, longitude from User Context), or /api/salons/popular. For "efficient" or "location" also pass latitude & longitude. Never say "I can't search" or "I can't find"—use these endpoints. Never offer unrelated alternatives (e.g. "most visited") instead of calling.
@@ -1134,8 +1135,8 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
             }
             if (!aiResponse || !String(aiResponse).trim()) {
               aiResponse = userContext.language === 'nl'
-                ? 'Waar kan ik je mee helpen? Je kunt me bijvoorbeeld vragen over je boekingen, een salon zoeken, of een afspraak maken.'
-                : 'How can I help you? You can ask about your bookings, search for a salon, or make an appointment.';
+                ? 'Ik begrijp het niet helemaal. Vertel in je eigen woorden wat je zoekt—bijvoorbeeld je afspraken bekijken, een salon zoeken, of iets boeken?'
+                : "I'm not sure what you need. Tell me in your own words—for example, are you looking to check your appointments, find a salon, or book one?";
             }
           }
         }
@@ -1147,13 +1148,13 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
         const isGreeting = /^(hallo|hi|hey|hoi|goedemorgen|goedemiddag|goedenavond|goedenacht|hello|good morning|good afternoon|good evening|yo|dag)\s*!?\.?$/i.test(m) || m.length <= 4;
         if (isGreeting) {
           aiResponse = userContext.language === 'nl'
-            ? 'Hallo! Leuk je te spreken. Waar kan ik je mee helpen? Je kunt me vragen over je boekingen, een salon zoeken, of een afspraak maken.'
-            : 'Hi! Nice to meet you. How can I help you today? You can ask about your bookings, search for a salon, or make an appointment.';
+            ? 'Hallo! Wat kan ik voor je doen?'
+            : 'Hi! What can I do for you today?';
           console.log('🔄 Replaced forbidden "verwerkt" response with greeting (user said:', message.substring(0, 30), ')');
         } else {
           aiResponse = userContext.language === 'nl'
-            ? 'Ik begrijp je vraag. Kun je wat specifieker zijn? Bijvoorbeeld: "Toon mijn boekingen", "Zoek salons in Amsterdam", of "Wanneer is mijn afspraak?"'
-            : 'I understand you have a question. Can you be more specific? For example: "Show my bookings", "Search salons in Amsterdam", or "When is my appointment?"';
+            ? 'Ik begrijp het niet helemaal. Kun je in je eigen woorden vertellen wat je nodig hebt?'
+            : "I didn't quite get that. Could you tell me in your own words what you're looking for?";
           console.log('🔄 Replaced forbidden "verwerkt" response with follow-up (user said:', message.substring(0, 50), ')');
         }
       }
@@ -1307,8 +1308,17 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
       // Ensure we never save or send an empty response (e.g. after genui strip removed everything)
       if (!aiResponse || !String(aiResponse).trim()) {
         aiResponse = userContext?.language === 'nl'
-          ? 'Waar kan ik je mee helpen? Je kunt me bijvoorbeeld vragen over je boekingen, een salon zoeken, of een afspraak maken.'
-          : 'How can I help you? You can ask about your bookings, search for a salon, or make an appointment.';
+          ? 'Ik begrijp het niet helemaal. Vertel in je eigen woorden wat je zoekt—bijvoorbeeld je afspraken bekijken, een salon zoeken, of iets boeken?'
+          : "I'm not sure what you need. Tell me in your own words—for example, are you looking to check your appointments, find a salon, or book one?";
+      }
+
+      // Never surface the robotic menu-like phrase; if it slipped through, replace with human language
+      const roboticPhrase = /How can I help you\?.*(bookings|salon|appointment)|Waar kan ik je mee helpen\?.*(boekingen|salon|afspraak)/i;
+      if (aiResponse && roboticPhrase.test(aiResponse)) {
+        aiResponse = userContext?.language === 'nl'
+          ? 'Ik begrijp het niet helemaal. Vertel in je eigen woorden wat je zoekt—bijvoorbeeld je afspraken bekijken, een salon zoeken, of iets boeken?'
+          : "I'm not sure what you need. Tell me in your own words—for example, are you looking to check your appointments, find a salon, or book one?";
+        console.log('🔄 Replaced robotic phrase with human fallback');
       }
 
       // Last-chance: if they asked about bookings (today, yesterday, "how about yesterday", etc.) and we still
