@@ -81,11 +81,26 @@ REVIEWS:
 - GET /api/reviews/my-reviews - Get current user's reviews
 - POST /api/reviews - Create a review
 
-When users ask questions, use make_api_request to fetch relevant data. After fetching data, display it using HTML in <output> tags with these CSS classes:
-- class="ai-card" for clickable cards
-- data-salon-id="..." for salon navigation  
-- data-booking-id="..." for booking navigation
-- class="ai-image" for images
+When users ask questions, use make_api_request to fetch relevant data. After fetching data, decide how to display it:
+
+1. **For structured data (bookings, salons, lists)**: Generate GenUI JSON using beginRendering command with appropriate components (List, Card, etc.)
+
+2. **For simple informational responses or lists**: Use Markdown format:
+   - Use **bold** for emphasis
+   - Use - or * for lists
+   - Use ## for headers
+   - Example: "You have the following bookings today:\n- **Salon Name** at 13:15\n- **Another Salon** at 14:30"
+
+3. **For interactive UI elements**: Use HTML in <output> tags with these CSS classes:
+   - class="ai-card" for clickable cards
+   - data-salon-id="..." for salon navigation  
+   - data-booking-id="..." for booking navigation
+   - class="ai-image" for images
+
+Choose the format that best fits the data:
+- GenUI: For complex, interactive UI with multiple components
+- Markdown: For simple lists, formatted text, or informational responses
+- HTML: For specific interactive elements like clickable cards
 
 ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in English'}
 
@@ -759,9 +774,12 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
       }
       
       // If still no response after function calls, the model might need a follow-up
-      if (!aiResponse || aiResponse.trim().length === 0) {
+      // Also check if response is generic and needs context
+      if (!aiResponse || aiResponse.trim().length === 0 || 
+          (aiResponse.toLowerCase().includes('verwerkt') && !aiResponse.includes('<output>')) ||
+          (aiResponse.toLowerCase().includes('processed') && !aiResponse.includes('<output>'))) {
         if (functionCallCount > 0) {
-          // Function calls completed but no text response - request a summary with GenUI
+          // Function calls completed but no text response - request a summary with HTML
           try {
             const messageLower = message.toLowerCase();
             let followUpPrompt = '';
