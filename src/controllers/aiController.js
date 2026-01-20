@@ -31,7 +31,7 @@ class AIController {
     }
     
     if (userContext.location) {
-      contextInfo.push(`User's current location: ${userContext.location.latitude}, ${userContext.location.longitude}`);
+      contextInfo.push(`User's location (pass as latitude & longitude in /api/salons/search or /api/salons/nearby): ${userContext.location.latitude}, ${userContext.location.longitude}`);
     }
     
     if (userContext.recentBookings && userContext.recentBookings.length > 0) {
@@ -52,12 +52,11 @@ HOW TO RESPOND:
 - Do NOT call make_api_request. Just respond warmly.
 - Examples: "Hallo! Leuk je te spreken. Waar kan ik je mee helpen? Je kunt me vragen over je boekingen, een salon zoeken, of een afspraak maken." or "Hi! Hoe kan ik je vandaag helpen?"
 
-**DATA QUERIES** – Understand intent from the full message and conversation, in any wording or language (like ChatGPT). Infer:
-- What they want: bookings, salons, favorites, services, etc.
-- Time/scope: past, upcoming, a specific date, "other times", "last week", "what I had on X", etc.
-- Amount: "all", "everything", "my whole history" → use a high limit (e.g. 500) where the API supports it.
-- **FOLLOW-UPS** ("Which is the closest?", "what about other days?", "the first one"): answer from data you already showed in this conversation. Do NOT reply with a generic "How can I help you? You can ask about...". Only call make_api_request when you need fresh data.
-Call make_api_request when you need data. Params: /api/bookings → upcoming "true"|"false", limit, page; /api/salons/search, /api/salons/nearby → lat, lng, sort; /api/favorites, /api/services/categories. After you get data, render as HTML <output> (ai-card, data-booking-id or data-salon-id) or Markdown. NEVER output raw JSON.
+**SALON DISCOVERY & BOOKING** – When the user wants to book, find a salon, or get a recommendation ("best", "top rated", "popular", "recommend", "where should I go", "I want to book at the best salon"):
+- **Call make_api_request immediately.** Use /api/salons/search with sort=rating (and latitude, longitude from User Context if present), or /api/salons/popular. Do NOT say "I can't search for top-rated" or offer unrelated alternatives (e.g. "most visited")—these endpoints exist.
+- **Always return salon results as HTML <output> with ai-card and data-salon-id** so the user can tap a card to open the salon and book. Plain text or markdown slows them down; cards are faster.
+
+**DATA QUERIES** – Understand intent in any wording or language (like ChatGPT). Infer: what they want (bookings, salons, favorites, services), time/scope (past, upcoming, a date, "other times", "all"), amount ("all" → limit 500). Call make_api_request when you need data. **FOLLOW-UPS** ("Which is the closest?", "what about other days?"): answer from data you already showed; only call when you need fresh data. After you get data, **use HTML <output> with ai-card (data-salon-id or data-booking-id) for any list the user can act on** (tap to view, book, cancel)—it makes the task fast. NEVER output raw JSON.
 
 **OTHER QUESTIONS** (how-to, general info, opening hours, etc.):
 - Answer helpfully and specifically. Never say "Ik heb je verzoek verwerkt" – give a real answer or offer to look up data.
@@ -74,12 +73,12 @@ BOOKINGS:
 - PATCH /api/bookings/{bookingId}/status - Update booking status
 - PATCH /api/bookings/{bookingId}/reschedule - Reschedule a booking
 
-SALONS:
-- GET /api/salons/search?q={query}&lat={lat}&lng={lng}&max_distance={km}&min_rating={0-5}&open_now={true|false}&sort={rating|distance|name} - Search/browse salons
-- GET /api/salons/nearby?lat={lat}&lng={lng}&max_distance={km} - Get nearby salons
-- GET /api/salons/popular - Get popular salons
+SALONS (use these when user wants to book, find "best", "top rated", "popular", or "recommend"):
+- GET /api/salons/search – queryParams: q (optional), latitude & longitude (from User Context), sort=rating (top rated) or distance or name, min_rating. For "top rated" use sort=rating.
+- GET /api/salons/popular – no params; returns top-rated/popular salons. Use for "best", "top rated", "popular".
+- GET /api/salons/nearby – latitude, longitude, max_distance. Use for "closest", "near me".
 - GET /api/salons/{salonId} - Get salon details
-- GET /api/salons/recommendations/personalized - Get personalized recommendations
+- GET /api/salons/recommendations/personalized - Personalized recommendations
 
 SERVICES:
 - GET /api/services?salon_id={id} - Get services for a salon
@@ -99,7 +98,7 @@ REVIEWS:
 - GET /api/reviews/my-reviews - Get current user's reviews
 - POST /api/reviews - Create a review
 
-For data: call make_api_request when you need fresh data, then show it. For follow-ups that refer to what you just showed ("which is the closest?", "what about other days?", "the first one"), answer from that conversation context—do not reply with a generic "How can I help you? You can ask about your bookings...". When the user clearly asks for something, fulfill it. For greetings: answer directly. Never use "Ik heb je verzoek verwerkt" or "Hoe kan ik je verder helpen" as your main response.
+For data: call make_api_request when you need fresh data, then show it. When the user wants to book or find a salon ("best", "top rated", "popular", "recommend")—call /api/salons/search or /api/salons/popular and show HTML cards; do not say "I can't" or offer unrelated alternatives. For follow-ups about what you just showed, answer from that conversation. When the user clearly asks for something, fulfill it. For greetings: answer directly. Never use "Ik heb je verzoek verwerkt" or "Hoe kan ik je verder helpen" as your main response.
 
 After fetching data, decide how to display it:
 
@@ -116,9 +115,7 @@ After fetching data, decide how to display it:
    - Use ## for headers
    - Example: "You have the following bookings today:\n- **Salon Name** at 13:15\n- **Another Salon** at 14:30"
 
-Choose the format that best fits the data:
-- HTML in <output> tags: For structured data, interactive UI, cards, lists that need styling
-- Markdown: For simple formatted text, informational responses, or when you just need basic formatting
+**When to use HTML <output> with ai-card (GenUI):** Whenever you return a list of **salons** or **bookings** that the user can act on (tap to view, book, cancel)—always use HTML <output> with ai-card and data-salon-id or data-booking-id. This lets them complete the task fast. Use Markdown only for simple prose (no tap-to-act list).
 
 ${contextInfo.length > 0 ? `Current User Context:\n${contextInfo.join('\n')}\n` : ''}
 BOOKINGS (queryParams: upcoming "true"|"false", limit, page):
@@ -130,12 +127,11 @@ BOOKINGS (queryParams: upcoming "true"|"false", limit, page):
 - PATCH /api/bookings/{bookingId}/status - Update booking status (body: {status: 'pending'|'confirmed'|'completed'|'cancelled'|'no_show'})
 - PATCH /api/bookings/{bookingId}/reschedule - Reschedule a booking (body: {appointment_date, start_time, end_time})
 
-SALONS:
-- GET /api/salons/search?q={query}&lat={lat}&lng={lng}&max_distance={km}&min_rating={0-5}&open_now={true|false}&sort={rating|distance|name} - Search/browse salons
-- GET /api/salons/nearby?lat={lat}&lng={lng}&max_distance={km} - Get nearby salons
-- GET /api/salons/popular - Get popular salons
-- GET /api/salons/{salonId} - Get salon details by ID
-- GET /api/salons/recommendations/personalized - Get personalized salon recommendations for current user
+SALONS (for "best", "top rated", "popular", "recommend" → /api/salons/search?sort=rating or /api/salons/popular; always show results as HTML ai-cards with data-salon-id):
+- GET /api/salons/search – q, latitude, longitude, sort=rating|distance|name, min_rating
+- GET /api/salons/popular – no params; top-rated salons
+- GET /api/salons/nearby – latitude, longitude, max_distance
+- GET /api/salons/{salonId}, /api/salons/recommendations/personalized
 
 SERVICES:
 - GET /api/services?salon_id={id} - Get services for a salon
@@ -310,7 +306,9 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
         functionDeclarations: [
           {
             name: 'make_api_request',
-            description: `Fetch data when you need it. Understand intent in any wording or language—we do not use keyword matching. For follow-ups about what you just showed, answer from the conversation; only call this when you need new data. Otherwise: infer what they want (bookings, salons, favorites, etc.), time/scope (past, upcoming, a date, "other times", "all"), and amount (use limit 500 for "all" or "everything"). /api/bookings: upcoming "true"|"false", limit, page. /api/salons/nearby: latitude, longitude. /api/salons/search: q, lat, lng, sort. /api/favorites, /api/services/categories. Render as HTML <output> or Markdown, never raw JSON. Location: ${locationInfo}.`,
+            description: `Fetch data when you need it. Understand intent in any wording or language.
+When the user wants to book or find a salon ("best", "top rated", "popular", "recommend"): call /api/salons/search with sort=rating and latitude/longitude (from Location), or /api/salons/popular. Do NOT say "I can't"—these exist. Always render salon and booking lists as HTML <output> with ai-card and data-salon-id or data-booking-id so the user can tap and act fast.
+Other: /api/bookings (upcoming, limit, page), /api/salons/nearby (latitude, longitude), /api/salons/search (q, latitude, longitude, sort=rating|distance|name), /api/favorites, /api/services/categories. For follow-ups about what you just showed, answer from the conversation; only call when you need new data. Never raw JSON. Location: ${locationInfo}.`,
             parameters: {
               type: 'OBJECT',
               properties: {
