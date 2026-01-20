@@ -1029,8 +1029,15 @@ Other: /api/bookings, /api/salons/nearby, /api/salons/search, /api/salons/{salon
               }
             }
           } else if (!aiResponse || !String(aiResponse).trim()) {
-            // Last resort: if the user asked for salons (best, top rated, recommend, etc.) and we have nothing, fetch and show
-            if (/\b(best|top|rated|recommend|popular|efficient)\b/i.test(message)) {
+            // If they asked for one thing about one salon (picture, location, maps), try that first
+            if (/\b(picture|image|photo|location|address|maps|map|navigate)\b|where is the picture|show me in maps|in a map/i.test(message)) {
+              try {
+                const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
+                if (html) aiResponse = html;
+              } catch (e) {}
+            }
+            // Else if they asked for salons (best, top rated, etc.) and we have nothing, fetch and show full list
+            if (!aiResponse && /\b(best|top|rated|recommend|popular|efficient)\b/i.test(message)) {
               try {
                 const loc = userContext?.location;
                 const query = loc ? { sort: 'rating', latitude: String(loc.latitude), longitude: String(loc.longitude) } : {};
@@ -1039,8 +1046,7 @@ Other: /api/bookings, /api/salons/nearby, /api/salons/search, /api/salons/{salon
                 let arr = Array.isArray(res?.data) ? res.data : res?.data?.data || res?.data?.salons || [];
                 if (arr.length > 0) {
                   const cards = arr.slice(0, 10).map(s => {
-                    const sid = s.id || '';
-                    const name = s.business_name || s.name || 'Salon';
+                    const sid = s.id || ''; const name = s.business_name || s.name || 'Salon';
                     const r = s.rating_average != null ? ` ${Number(s.rating_average).toFixed(1)}` : '';
                     return `<div class="ai-card" data-salon-id="${sid}" style="padding:12px;margin:8px 0;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;"><strong>${name}</strong>${r}</div>`;
                   }).join('');
