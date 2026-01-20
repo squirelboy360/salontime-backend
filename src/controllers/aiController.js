@@ -42,18 +42,22 @@ class AIController {
       contextInfo.push(`Favorite salons: ${userContext.favoriteSalons.length} salon(s)`);
     }
 
-    return `You are an AI assistant for SalonTime, a salon booking platform. You have access to the user's data through API endpoints using the make_api_request function.
+    return `You are a friendly AI assistant for SalonTime, a salon booking platform. You have access to the user's data through the make_api_request function.
 
-CRITICAL RULES - YOU MUST FOLLOW THESE (VIOLATION WILL CAUSE ERRORS):
-1. When users ask about bookings, salons, appointments, or ANY data query, you MUST call make_api_request FIRST. DO NOT respond with text until you have fetched the data.
-2. NEVER respond with "Ik heb je verzoek verwerkt", "I processed your request", "Hoe kan ik je verder helpen", or "How can I help you" - these responses are STRICTLY FORBIDDEN and will be rejected.
-3. After calling make_api_request and receiving data, you MUST display the actual data in your response using HTML (<output> tags) or Markdown format. Show the data, not a generic message.
-4. If a user asks "Show me my bookings" or "Show me all my bookings", you MUST:
-   - Call make_api_request with GET /api/bookings FIRST
-   - Wait for the response
-   - Display the bookings data in HTML or Markdown
-   - DO NOT say "Ik heb je verzoek verwerkt" - show the actual bookings
-5. If you respond with text before making function calls for a data query, your response will be rejected and you will be forced to make the function call.
+CRITICAL - NEVER USE THIS PHRASE: "Ik heb je verzoek verwerkt. Hoe kan ik je verder helpen?" It is robotic, unhelpful, and FORBIDDEN. Use natural, specific replies instead.
+
+HOW TO RESPOND:
+
+**GREETINGS** (hallo, hi, hey, goedemorgen, goedemiddag, goedenavond, hello, good morning):
+- Do NOT call make_api_request. Just respond warmly.
+- Examples: "Hallo! Leuk je te spreken. Waar kan ik je mee helpen? Je kunt me vragen over je boekingen, een salon zoeken, of een afspraak maken." or "Hi! Hoe kan ik je vandaag helpen?"
+
+**DATA QUERIES** (bookings, salons, appointments, "show me", "toon", "mijn boekingen"):
+- You MUST call make_api_request FIRST to fetch the data.
+- After you receive the data, display it in HTML (<output> tags) or Markdown. Show the actual data, never a generic "verwerkt" message.
+
+**OTHER QUESTIONS** (how-to, general info, opening hours, etc.):
+- Answer helpfully and specifically. Never say "Ik heb je verzoek verwerkt" – give a real answer or offer to look up data.
 
 ${contextInfo.length > 0 ? `Current User Context:\n${contextInfo.join('\n')}\n` : ''}
 
@@ -92,7 +96,7 @@ REVIEWS:
 - GET /api/reviews/my-reviews - Get current user's reviews
 - POST /api/reviews - Create a review
 
-CRITICAL: When users ask questions, you MUST call make_api_request FIRST before responding. NEVER say "Ik heb je verzoek verwerkt" or "Hoe kan ik je verder helpen" - these responses are FORBIDDEN. You MUST show the actual data after fetching it.
+For data questions (bookings, salons, etc.): call make_api_request first, then show the data. For greetings or non-data questions: answer directly. Never use "Ik heb je verzoek verwerkt" or "Hoe kan ik je verder helpen" as your main response.
 
 After fetching data, decide how to display it:
 
@@ -871,26 +875,66 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
             }
           }
           
-          // Force HTML generation with the data
-          const followUpPrompt = `De gebruiker vroeg: "${message}". Je hebt de data opgehaald: ${JSON.stringify(dataArray.slice(0, 10))}. 
-
-JE MOET NU DE DATA TONEN. Gebruik HTML in <output> tags met ai-card elementen. Toon de data, niet een generieke boodschap.`;
-
-          const htmlResult = await chat.sendMessage(followUpPrompt);
-          const htmlResponse = htmlResult.response;
-          if (typeof htmlResponse.text === 'function') {
-            aiResponse = htmlResponse.text();
-          } else if (htmlResponse.text) {
-            aiResponse = htmlResponse.text;
+          // Generate HTML directly from the data - don't trust the AI to do it
+          if (dataArray.length > 0) {
+            console.log('📦 Generating HTML directly from', dataArray.length, 'items');
+            
+            // Generate HTML cards for bookings
+            if (messageLowerCheck.includes('booking') || messageLowerCheck.includes('boeking') || messageLowerCheck.includes('gepland')) {
+              const bookingCards = dataArray.slice(0, 10).map(booking => {
+                const salonName = booking.salon?.business_name || booking.salons?.business_name || booking.salon_name || 'Salon';
+                const serviceName = booking.service?.name || booking.services?.name || booking.service_name || 'Service';
+                const date = booking.appointment_date || booking.appointmentDate || '';
+                const time = booking.start_time || booking.startTime || '';
+                const bookingId = booking.id || '';
+                
+                return `
+                  <div class="ai-card" data-booking-id="${bookingId}" style="padding: 16px; margin: 8px 0; border: 1px solid #e0e0e0; border-radius: 8px; cursor: pointer;">
+                    <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600;">${salonName}</h3>
+                    <p style="margin: 4px 0; color: #666; font-size: 14px;">${serviceName}</p>
+                    <p style="margin: 4px 0; color: #666; font-size: 14px;">📅 ${date} om ${time}</p>
+                  </div>
+                `;
+              }).join('');
+              
+              aiResponse = `<output>
+                <p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">Je hebt ${dataArray.length} boeking(en):</p>
+                ${bookingCards}
+              </output>`;
+            } else {
+              // Generic data display
+              const dataCards = dataArray.slice(0, 10).map((item, index) => {
+                const title = item.name || item.business_name || item.title || `Item ${index + 1}`;
+                const id = item.id || '';
+                const cardType = messageLowerCheck.includes('salon') ? 'salon' : 'item';
+                
+                return `
+                  <div class="ai-card" data-${cardType}-id="${id}" style="padding: 16px; margin: 8px 0; border: 1px solid #e0e0e0; border-radius: 8px; cursor: pointer;">
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 600;">${title}</h3>
+                  </div>
+                `;
+              }).join('');
+              
+              aiResponse = `<output>
+                <p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">Gevonden resultaten:</p>
+                ${dataCards}
+              </output>`;
+            }
+          } else {
+            // No data found
+            aiResponse = messageLowerCheck.includes('booking') || messageLowerCheck.includes('boeking') 
+              ? 'Je hebt geen boekingen gevonden.'
+              : 'Geen resultaten gevonden.';
           }
           
+          console.log('✅ Generated HTML response directly, length:', aiResponse.length);
           functionCallCount = 1; // Mark that we made a function call
         } catch (error) {
           console.error('❌ Forced function call failed:', error);
         }
       }
       
-      // Try multiple ways to extract text from response
+      // Try multiple ways to extract text from response (only if we didn't already generate it)
       if (!aiResponse) {
         try {
           if (typeof response.text === 'function') {
@@ -928,10 +972,14 @@ JE MOET NU DE DATA TONEN. Gebruik HTML in <output> tags met ai-card elementen. T
         }
       }
       
-      // If still no response after function calls, the model might need a follow-up
-      // Also check if response is generic and needs context
-      const responseLower = aiResponse.toLowerCase();
-      const isGenericResponse = !aiResponse || aiResponse.trim().length === 0 || 
+      // If we already generated HTML directly, skip generic response check
+      if (aiResponse && aiResponse.includes('<output>')) {
+        console.log('✅ Using directly generated HTML response, skipping generic check');
+      } else {
+        // If still no response after function calls, the model might need a follow-up
+        // Also check if response is generic and needs context
+        const responseLower = aiResponse.toLowerCase();
+        const isGenericResponse = !aiResponse || aiResponse.trim().length === 0 || 
           (responseLower.includes('verwerkt') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
           (responseLower.includes('processed') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
           (responseLower.includes('hoe kan ik') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
@@ -940,7 +988,7 @@ JE MOET NU DE DATA TONEN. Gebruik HTML in <output> tags met ai-card elementen. T
           (responseLower.includes('how can i help you') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
           (responseLower.trim() === 'ik heb je verzoek verwerkt. hoe kan ik je verder helpen?' && !aiResponse.includes('<output>') && !aiResponse.includes('**'));
       
-      console.log('🔍 Checking response:', {
+        console.log('🔍 Checking response:', {
         isGeneric: isGenericResponse,
         functionCallCount,
         responseLength: aiResponse.length,
@@ -950,103 +998,103 @@ JE MOET NU DE DATA TONEN. Gebruik HTML in <output> tags met ai-card elementen. T
         allFunctionResponsesCount: allFunctionResponses.length
       });
       
-      // If we have function calls but got a generic response, log more details
-      if (isGenericResponse && functionCallCount > 0) {
-        console.log('⚠️ WARNING: Generic response detected after', functionCallCount, 'function call iterations');
-        console.log('📦 Available function responses:', allFunctionResponses.length);
-        if (allFunctionResponses.length > 0) {
-          const lastResponse = allFunctionResponses[allFunctionResponses.length - 1];
-          console.log('📦 Last function response structure:', JSON.stringify(Object.keys(lastResponse || {})).substring(0, 200));
-        }
-      }
-      
-      if (isGenericResponse && functionCallCount > 0) {
-        // Function calls completed but response is generic - force display of data
-        console.log('⚠️ Generic response detected after function calls, forcing data display');
-        let responseData = null;
-        let dataArray = [];
-        
-        try {
-          // Get the actual data from function responses
-          if (allFunctionResponses.length === 0) {
-            console.error('❌ No function responses available for follow-up!');
-            throw new Error('No function responses available');
-          }
-          const lastFunctionResponse = allFunctionResponses[allFunctionResponses.length - 1];
-          responseData = lastFunctionResponse?.functionResponse?.response?.data;
-          
-          console.log('📦 Last function response data structure:', responseData ? (Array.isArray(responseData) ? `Array(${responseData.length})` : typeof responseData) : 'null');
-          
-          console.log('📦 Extracted response data:', responseData ? (Array.isArray(responseData) ? `Array(${responseData.length})` : Object.keys(responseData)) : 'null');
-          
-          // Handle different response structures
-          if (responseData && typeof responseData === 'object') {
-            if (responseData.success && responseData.data) {
-              responseData = responseData.data;
-            } else if (responseData.data && Array.isArray(responseData.data)) {
-              responseData = responseData.data;
-            } else if (responseData.bookings && Array.isArray(responseData.bookings)) {
-              responseData = responseData.bookings;
-            } else if (responseData.salons && Array.isArray(responseData.salons)) {
-              responseData = responseData.salons;
+          // If we have function calls but got a generic response, log more details
+          if (isGenericResponse && functionCallCount > 0) {
+            console.log('⚠️ WARNING: Generic response detected after', functionCallCount, 'function call iterations');
+            console.log('📦 Available function responses:', allFunctionResponses.length);
+            if (allFunctionResponses.length > 0) {
+              const lastResponse = allFunctionResponses[allFunctionResponses.length - 1];
+              console.log('📦 Last function response structure:', JSON.stringify(Object.keys(lastResponse || {})).substring(0, 200));
             }
           }
           
-          dataArray = Array.isArray(responseData) ? responseData : [];
-          
-          const messageLower = message.toLowerCase();
-          let followUpPrompt = '';
-          
-          if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('vandaag')) {
-            if (dataArray.length > 0) {
-              // Filter for today's bookings if user asked about today
-              const today = new Date().toISOString().split('T')[0];
-              let filteredBookings = dataArray;
-              if (messageLower.includes('vandaag') || messageLower.includes('today') || messageLower.includes('gepland')) {
-                filteredBookings = dataArray.filter(b => {
-                  const bookingDate = b.appointment_date || b.appointmentDate || b.date;
-                  return bookingDate && bookingDate.startsWith(today);
-                });
+          if (isGenericResponse && functionCallCount > 0) {
+            // Function calls completed but response is generic - force display of data
+            console.log('⚠️ Generic response detected after function calls, forcing data display');
+            let responseData = null;
+            let dataArray = [];
+            
+            try {
+              // Get the actual data from function responses
+              if (allFunctionResponses.length === 0) {
+                console.error('❌ No function responses available for follow-up!');
+                throw new Error('No function responses available');
+              }
+              const lastFunctionResponse = allFunctionResponses[allFunctionResponses.length - 1];
+              responseData = lastFunctionResponse?.functionResponse?.response?.data;
+              
+              console.log('📦 Last function response data structure:', responseData ? (Array.isArray(responseData) ? `Array(${responseData.length})` : typeof responseData) : 'null');
+              
+              console.log('📦 Extracted response data:', responseData ? (Array.isArray(responseData) ? `Array(${responseData.length})` : Object.keys(responseData)) : 'null');
+              
+              // Handle different response structures
+              if (responseData && typeof responseData === 'object') {
+                if (responseData.success && responseData.data) {
+                  responseData = responseData.data;
+                } else if (responseData.data && Array.isArray(responseData.data)) {
+                  responseData = responseData.data;
+                } else if (responseData.bookings && Array.isArray(responseData.bookings)) {
+                  responseData = responseData.bookings;
+                } else if (responseData.salons && Array.isArray(responseData.salons)) {
+                  responseData = responseData.salons;
+                }
               }
               
-              if (filteredBookings.length > 0) {
-                followUpPrompt = `De gebruiker vroeg naar boekingen. Je hebt ${filteredBookings.length} booking(s) gevonden voor vandaag. Toon ZEKER deze boekingen in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(filteredBookings.slice(0, 10))}. Maak ai-card elementen voor elke booking met data-booking-id. Begin met een korte samenvatting zoals "Je hebt ${filteredBookings.length} boeking(en) vandaag:" en toon dan de cards.`;
+              dataArray = Array.isArray(responseData) ? responseData : [];
+              
+              const messageLower = message.toLowerCase();
+              let followUpPrompt = '';
+              
+              if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('vandaag')) {
+                if (dataArray.length > 0) {
+                  // Filter for today's bookings if user asked about today
+                  const today = new Date().toISOString().split('T')[0];
+                  let filteredBookings = dataArray;
+                  if (messageLower.includes('vandaag') || messageLower.includes('today') || messageLower.includes('gepland')) {
+                    filteredBookings = dataArray.filter(b => {
+                      const bookingDate = b.appointment_date || b.appointmentDate || b.date;
+                      return bookingDate && bookingDate.startsWith(today);
+                    });
+                  }
+                  
+                  if (filteredBookings.length > 0) {
+                    followUpPrompt = `De gebruiker vroeg naar boekingen. Je hebt ${filteredBookings.length} booking(s) gevonden voor vandaag. Toon ZEKER deze boekingen in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(filteredBookings.slice(0, 10))}. Maak ai-card elementen voor elke booking met data-booking-id. Begin met een korte samenvatting zoals "Je hebt ${filteredBookings.length} boeking(en) vandaag:" en toon dan de cards.`;
+                  } else {
+                    followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen voor vandaag. Zeg duidelijk in het Nederlands: "Je hebt geen boekingen vandaag."';
+                  }
+                } else {
+                  followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen gevonden. Zeg dit duidelijk in het Nederlands: "Je hebt geen boekingen vandaag" of "Je hebt geen boekingen gevonden".';
+                }
+              } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
+                if (dataArray.length > 0) {
+                  followUpPrompt = `Je hebt ${dataArray.length} salon(s) opgehaald. Toon NU de salons in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(dataArray.slice(0, 10))}. Maak ai-card elementen voor elke salon met data-salon-id.`;
+                } else {
+                  followUpPrompt = 'Je hebt de salons opgehaald maar er zijn geen salons gevonden. Zeg dit duidelijk in het Nederlands.';
+                }
               } else {
-                followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen voor vandaag. Zeg duidelijk in het Nederlands: "Je hebt geen boekingen vandaag."';
+                if (dataArray.length > 0) {
+                  followUpPrompt = `Je hebt data opgehaald. Toon NU de data in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(dataArray.slice(0, 10))}.`;
+                } else {
+                  followUpPrompt = 'Je hebt de data opgehaald maar er is niets gevonden. Zeg dit duidelijk in het Nederlands.';
+                }
               }
-            } else {
-              followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen gevonden. Zeg dit duidelijk in het Nederlands: "Je hebt geen boekingen vandaag" of "Je hebt geen boekingen gevonden".';
-            }
-          } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
-            if (dataArray.length > 0) {
-              followUpPrompt = `Je hebt ${dataArray.length} salon(s) opgehaald. Toon NU de salons in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(dataArray.slice(0, 10))}. Maak ai-card elementen voor elke salon met data-salon-id.`;
-            } else {
-              followUpPrompt = 'Je hebt de salons opgehaald maar er zijn geen salons gevonden. Zeg dit duidelijk in het Nederlands.';
-            }
-          } else {
-            if (dataArray.length > 0) {
-              followUpPrompt = `Je hebt data opgehaald. Toon NU de data in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(dataArray.slice(0, 10))}.`;
-            } else {
-              followUpPrompt = 'Je hebt de data opgehaald maar er is niets gevonden. Zeg dit duidelijk in het Nederlands.';
-            }
-          }
-          
-          console.log('🔄 Sending follow-up prompt to force data display:', followUpPrompt.substring(0, 100));
-          
-          const followUpResult = await chat.sendMessage(followUpPrompt);
-          const followUpResponse = followUpResult.response;
-          
-          if (typeof followUpResponse.text === 'function') {
-            aiResponse = followUpResponse.text();
-          } else if (followUpResponse.text) {
-            aiResponse = followUpResponse.text;
-          } else if (followUpResponse.candidates && followUpResponse.candidates[0] && followUpResponse.candidates[0].content) {
-            const parts = followUpResponse.candidates[0].content.parts || [];
-            aiResponse = parts.map(part => part.text || '').join('');
-          }
-          
-          console.log('✅ Follow-up response received:', aiResponse.substring(0, 200));
-          } catch (e) {
+              
+              console.log('🔄 Sending follow-up prompt to force data display:', followUpPrompt.substring(0, 100));
+              
+              const followUpResult = await chat.sendMessage(followUpPrompt);
+              const followUpResponse = followUpResult.response;
+              
+              if (typeof followUpResponse.text === 'function') {
+                aiResponse = followUpResponse.text();
+              } else if (followUpResponse.text) {
+                aiResponse = followUpResponse.text;
+              } else if (followUpResponse.candidates && followUpResponse.candidates[0] && followUpResponse.candidates[0].content) {
+                const parts = followUpResponse.candidates[0].content.parts || [];
+                aiResponse = parts.map(part => part.text || '').join('');
+              }
+              
+              console.log('✅ Follow-up response received:', aiResponse.substring(0, 200));
+            } catch (e) {
             console.error('❌ Follow-up prompt failed:', e);
             // If follow-up fails, provide a helpful default message based on the request
             const messageLower = message.toLowerCase();
@@ -1072,10 +1120,31 @@ JE MOET NU DE DATA TONEN. Gebruik HTML in <output> tags met ai-card elementen. T
               }
             }
           }
-        } else {
-          // No function calls but still empty - provide a default response
-          aiResponse = 'Ik heb je verzoek verwerkt. Hoe kan ik je verder helpen?';
+          } else {
+            // No function calls, generic or empty - use a helpful default instead of "verwerkt"
+            aiResponse = userContext.language === 'nl'
+              ? 'Waar kan ik je mee helpen? Je kunt me bijvoorbeeld vragen over je boekingen, een salon zoeken, of een afspraak maken.'
+              : 'How can I help you? You can ask about your bookings, search for a salon, or make an appointment.';
+          }
         }
+
+      // POST-PROCESS: Replace the forbidden "Ik heb je verzoek verwerkt" response with something actually helpful
+      const forbidden = /^\s*ik heb je verzoek verwerkt\.?\s*hoe kan ik je verder helpen\??\s*[.?!'"]*\s*$/i;
+      if (aiResponse && forbidden.test(aiResponse.trim())) {
+        const m = message.trim().toLowerCase();
+        const isGreeting = /^(hallo|hi|hey|hoi|goedemorgen|goedemiddag|goedenavond|goedenacht|hello|good morning|good afternoon|good evening|yo|dag)\s*!?\.?$/i.test(m) || m.length <= 4;
+        if (isGreeting) {
+          aiResponse = userContext.language === 'nl'
+            ? 'Hallo! Leuk je te spreken. Waar kan ik je mee helpen? Je kunt me vragen over je boekingen, een salon zoeken, of een afspraak maken.'
+            : 'Hi! Nice to meet you. How can I help you today? You can ask about your bookings, search for a salon, or make an appointment.';
+          console.log('🔄 Replaced forbidden "verwerkt" response with greeting (user said:', message.substring(0, 30), ')');
+        } else {
+          aiResponse = userContext.language === 'nl'
+            ? 'Ik begrijp je vraag. Kun je wat specifieker zijn? Bijvoorbeeld: "Toon mijn boekingen", "Zoek salons in Amsterdam", of "Wanneer is mijn afspraak?"'
+            : 'I understand you have a question. Can you be more specific? For example: "Show my bookings", "Search salons in Amsterdam", or "When is my appointment?"';
+          console.log('🔄 Replaced forbidden "verwerkt" response with follow-up (user said:', message.substring(0, 50), ')');
+        }
+      }
 
       // Check if response contains GenUI/A2UI commands (legacy support - not actively used)
       // The AI might include GenUI commands in its response, but we primarily use HTML now
