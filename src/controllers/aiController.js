@@ -44,7 +44,9 @@ class AIController {
 
     return `You are a friendly AI assistant for SalonTime, a salon booking platform. You have access to the user's data through the make_api_request function.
 
-CRITICAL - NEVER USE THIS PHRASE: "Ik heb je verzoek verwerkt. Hoe kan ik je verder helpen?" It is robotic, unhelpful, and FORBIDDEN. Use natural, specific replies instead.
+CRITICAL - FORBIDDEN PHRASES (never use):
+- "Ik heb je verzoek verwerkt. Hoe kan ik je verder helpen?"
+- "I can't directly search for the top-rated salon" / "I can't search for [X]" / "I can't find" – you CAN: use /api/salons/search?sort=rating or /api/salons/popular. Call them and show HTML cards instead of deflecting.
 
 HOW TO RESPOND:
 
@@ -52,9 +54,9 @@ HOW TO RESPOND:
 - Do NOT call make_api_request. Just respond warmly.
 - Examples: "Hallo! Leuk je te spreken. Waar kan ik je mee helpen? Je kunt me vragen over je boekingen, een salon zoeken, of een afspraak maken." or "Hi! Hoe kan ik je vandaag helpen?"
 
-**SALON DISCOVERY & BOOKING** – When the user wants to book, find a salon, or get a recommendation ("best", "top rated", "popular", "recommend", "where should I go", "I want to book at the best salon"):
-- **Call make_api_request immediately.** Use /api/salons/search with sort=rating (and latitude, longitude from User Context if present), or /api/salons/popular. Do NOT say "I can't search for top-rated" or offer unrelated alternatives (e.g. "most visited")—these endpoints exist.
-- **Always return salon results as HTML <output> with ai-card and data-salon-id** so the user can tap a card to open the salon and book. Plain text or markdown slows them down; cards are faster.
+**SALON DISCOVERY & BOOKING** – When the user wants to book, find a salon, or get a recommendation ("best", "top rated", "popular", "recommend", "where should I go", "most efficient", "based on my location"):
+- **You MUST call make_api_request.** Use /api/salons/search with sort=rating (and latitude, longitude from User Context), or /api/salons/popular. For "efficient" or "location" also pass latitude & longitude. Never say "I can't search" or "I can't find"—use these endpoints. Never offer unrelated alternatives (e.g. "most visited") instead of calling.
+- **Always return salon results as HTML <output> with ai-card and data-salon-id** so the user can tap to open and book. Do not reply with only "How can I help you?" or a generic—call the API and show cards.
 
 **DATA QUERIES** – Understand intent in any wording or language (like ChatGPT). Infer: what they want (bookings, salons, favorites, services), time/scope (past, upcoming, a date, "other times", "all"), amount ("all" → limit 500). Call make_api_request when you need data. **FOLLOW-UPS** ("Which is the closest?", "what about other days?"): answer from data you already showed; only call when you need fresh data. After you get data, **use HTML <output> with ai-card (data-salon-id or data-booking-id) for any list the user can act on** (tap to view, book, cancel)—it makes the task fast. NEVER output raw JSON.
 
@@ -98,7 +100,7 @@ REVIEWS:
 - GET /api/reviews/my-reviews - Get current user's reviews
 - POST /api/reviews - Create a review
 
-For data: call make_api_request when you need fresh data, then show it. When the user wants to book or find a salon ("best", "top rated", "popular", "recommend")—call /api/salons/search or /api/salons/popular and show HTML cards; do not say "I can't" or offer unrelated alternatives. For follow-ups about what you just showed, answer from that conversation. When the user clearly asks for something, fulfill it. For greetings: answer directly. Never use "Ik heb je verzoek verwerkt" or "Hoe kan ik je verder helpen" as your main response.
+For data: you MUST call make_api_request when the user asks for salons (book, best, top rated, recommend, popular) or bookings—then show HTML cards. Do not reply with only "How can I help you?" or a generic; do not say "I can't search". For follow-ups about what you just showed, answer from that conversation. When the user clearly asks for something, fulfill it. For greetings: answer directly. Never use "Ik heb je verzoek verwerkt" or "Hoe kan ik je verder helpen" as your main response.
 
 After fetching data, decide how to display it:
 
@@ -655,23 +657,17 @@ Other: /api/bookings (upcoming, limit, page), /api/salons/nearby (latitude, long
       
       const tools = this.getFunctionCallingTools(userContext);
       
-      // Only add system prompt for NEW conversations (when history is empty)
-      // For existing conversations, the AI should understand from the conversation context
-      // Adding system prompt every time disrupts the natural conversation flow
-      if (chatHistory.length === 0) {
-        // New conversation - add system prompt once
-        console.log(`📝 New conversation - adding system prompt`);
-        chatHistory.unshift({
-          role: 'model',
-          parts: [{ text: 'I understand. I will ALWAYS use function calls when users ask for data, and then display it using HTML in <output> tags or Markdown format.' }]
-        });
-        chatHistory.unshift({
-          role: 'user',
-          parts: [{ text: systemPrompt }]
-        });
-      } else {
-        console.log(`📝 Existing conversation with ${chatHistory.length} messages - using conversation context`);
-      }
+      // Always prepend system prompt so the model keeps context (endpoints, rules, "never say I can't search")
+      // Without it, in long conversations the model forgets and deflects or returns generic
+      chatHistory.unshift({
+        role: 'model',
+        parts: [{ text: 'I understand. I will use function calls when users ask for data (bookings, salons, best, top rated, recommend) and show HTML <output> cards for salons/bookings. I will never say "I can\'t search for top-rated"—I will call /api/salons/search or /api/salons/popular.' }]
+      });
+      chatHistory.unshift({
+        role: 'user',
+        parts: [{ text: systemPrompt }]
+      });
+      console.log(`📝 Chat history: ${chatHistory.length} messages (including system prompt)`);
       
       console.log(`💬 Starting chat with ${chatHistory.length} messages in history`);
       
@@ -982,14 +978,35 @@ Other: /api/bookings (upcoming, limit, page), /api/salons/nearby (latitude, long
               }
             }
           } else if (!aiResponse || !String(aiResponse).trim()) {
-            // Only use generic fallback when we have no response—never overwrite a valid AI answer
-            aiResponse = userContext.language === 'nl'
-              ? 'Waar kan ik je mee helpen? Je kunt me bijvoorbeeld vragen over je boekingen, een salon zoeken, of een afspraak maken.'
-              : 'How can I help you? You can ask about your bookings, search for a salon, or make an appointment.';
+            // Last resort: if the user asked for salons (best, top rated, recommend, etc.) and we have nothing, fetch and show
+            if (/\b(best|top|rated|recommend|popular|efficient)\b/i.test(message)) {
+              try {
+                const loc = userContext?.location;
+                const query = loc ? { sort: 'rating', latitude: String(loc.latitude), longitude: String(loc.longitude) } : {};
+                const ep = Object.keys(query).length >= 3 ? '/api/salons/search' : '/api/salons/popular';
+                const res = await this.makeApiRequest(userId, userToken, 'GET', ep, null, query);
+                let arr = Array.isArray(res?.data) ? res.data : res?.data?.data || res?.data?.salons || [];
+                if (arr.length > 0) {
+                  const cards = arr.slice(0, 10).map(s => {
+                    const sid = s.id || '';
+                    const name = s.business_name || s.name || 'Salon';
+                    const r = s.rating_average != null ? ` ${Number(s.rating_average).toFixed(1)}` : '';
+                    return `<div class="ai-card" data-salon-id="${sid}" style="padding:12px;margin:8px 0;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;"><strong>${name}</strong>${r}</div>`;
+                  }).join('');
+                  const head = userContext?.language === 'nl' ? 'Top salons om te boeken:' : 'Top salons to book:';
+                  aiResponse = `<output><p>${head}</p>${cards}</output>`;
+                }
+              } catch (e) { /* keep generic below */ }
+            }
+            if (!aiResponse || !String(aiResponse).trim()) {
+              aiResponse = userContext.language === 'nl'
+                ? 'Waar kan ik je mee helpen? Je kunt me bijvoorbeeld vragen over je boekingen, een salon zoeken, of een afspraak maken.'
+                : 'How can I help you? You can ask about your bookings, search for a salon, or make an appointment.';
+            }
           }
         }
 
-      // POST-PROCESS: Replace the forbidden "Ik heb je verzoek verwerkt" response with something actually helpful
+      // POST-PROCESS: Replace forbidden responses
       const forbidden = /^\s*ik heb je verzoek verwerkt\.?\s*hoe kan ik je verder helpen\??\s*[.?!'"]*\s*$/i;
       if (aiResponse && forbidden.test(aiResponse.trim())) {
         const m = message.trim().toLowerCase();
@@ -1005,6 +1022,26 @@ Other: /api/bookings (upcoming, limit, page), /api/salons/nearby (latitude, long
             : 'I understand you have a question. Can you be more specific? For example: "Show my bookings", "Search salons in Amsterdam", or "When is my appointment?"';
           console.log('🔄 Replaced forbidden "verwerkt" response with follow-up (user said:', message.substring(0, 50), ')');
         }
+      }
+      // If the model said "I can't search for top-rated" or similar, fetch salons and show cards instead
+      if (aiResponse && /I can't (directly )?search for (the )?top-rated|I can't find (the )?top-rated|I cannot (directly )?search for/i.test(aiResponse) && /\b(best|top|rated|recommend|popular)\b/i.test(message)) {
+        try {
+          const loc = userContext?.location;
+          const q = loc ? { sort: 'rating', latitude: String(loc.latitude), longitude: String(loc.longitude) } : {};
+          const ep = Object.keys(q).length >= 3 ? '/api/salons/search' : '/api/salons/popular';
+          const res = await this.makeApiRequest(userId, userToken, 'GET', ep, null, q);
+          let arr = Array.isArray(res?.data) ? res.data : res?.data?.data || res?.data?.salons || [];
+          if (arr.length > 0) {
+            const cards = arr.slice(0, 10).map(s => {
+              const sid = s.id || '';
+              const name = s.business_name || s.name || 'Salon';
+              const r = s.rating_average != null ? ` ${Number(s.rating_average).toFixed(1)}` : '';
+              return `<div class="ai-card" data-salon-id="${sid}" style="padding:12px;margin:8px 0;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;"><strong>${name}</strong>${r}</div>`;
+            }).join('');
+            aiResponse = `<output><p>${userContext?.language === 'nl' ? 'Top salons om te boeken:' : 'Top salons to book:'}</p>${cards}</output>`;
+            console.log('🔄 Replaced "I can\'t search" deflection with salon cards');
+          }
+        } catch (e) { /* leave aiResponse as is */ }
       }
 
       // Check if response contains GenUI/A2UI commands (legacy support - not actively used)
