@@ -118,6 +118,7 @@ After fetching data, decide how to display it:
    - data-salon-id="..." for salon navigation  
    - data-booking-id="..." for booking navigation
    - class="ai-image" for images
+   - For <a href> links (e.g. Open in Google Maps): do NOT use target="_blank"—use <a href="url"> only so they open in the same view and the in-app back button works.
    - Use proper HTML structure for lists, cards, and interactive elements
 2. **When they ask for one specific thing about one item** (picture, address, "open in maps", services, etc.): show only that. Do not re-output the full list.
 3. **For simple informational responses or formatted text**: Use Markdown format:
@@ -304,7 +305,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     const mapsUrl = (lat != null && lng != null)
       ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
       : (salon.address || salon.city ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(salon.address || salon.city || '')}` : null);
-    const link = mapsUrl ? `<a href="${mapsUrl}" target="_blank" rel="noopener">${lang ? 'Open in Google Maps' : 'Open in Google Maps'}</a>` : '';
+    const link = mapsUrl ? `<a href="${mapsUrl}">${lang ? 'Open in Google Maps' : 'Open in Google Maps'}</a>` : '';
     return `<output><p><strong>${salon.business_name || 'Salon'}</strong></p><p>${addr}</p>${link}</output>`;
   }
 
