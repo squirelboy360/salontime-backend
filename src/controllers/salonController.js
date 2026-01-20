@@ -813,9 +813,97 @@ class SalonController {
         throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
       }
 
-      if (!salon.stripe_account_id) {
-        console.error('No Stripe account ID found for salon:', salon.id);
-        throw new AppError('Stripe account not found for this salon', 404, 'STRIPE_ACCOUNT_NOT_FOUND');
+      let stripeAccountId = salon.stripe_account_id;
+
+      // If no Stripe account ID or account doesn't exist in current Stripe project, create a new one
+      if (!stripeAccountId) {
+        console.log('No Stripe account ID found, creating new account...');
+        // Create new Stripe Connect account
+        const { data: userProfile } = await supabaseAdmin
+          .from('user_profiles')
+          .select('*')
+          .eq('id', req.user.id)
+          .single();
+
+        const stripeAccount = await stripeService.createConnectAccount({
+          business_name: salon.business_name,
+          salon_id: salon.id,
+          owner_id: req.user.id,
+          email: salon.email || userProfile?.email,
+          country: salon.country || 'NL',
+          business_type: 'individual'
+        });
+
+        // Update salon with new Stripe account ID
+        await supabaseAdmin
+          .from('salons')
+          .update({
+            stripe_account_id: stripeAccount.id,
+            stripe_account_status: 'pending'
+          })
+          .eq('id', salon.id);
+
+        // Create or update Stripe account record
+        await supabaseAdmin
+          .from('stripe_accounts')
+          .upsert({
+            salon_id: salon.id,
+            stripe_account_id: stripeAccount.id,
+            account_status: 'pending',
+            onboarding_completed: false,
+            country: salon.country || 'NL',
+            updated_at: new Date().toISOString()
+          });
+
+        stripeAccountId = stripeAccount.id;
+        console.log('✅ Created new Stripe account:', stripeAccountId);
+      } else {
+        // Verify the account exists in Stripe
+        try {
+          await stripeService.getAccountStatus(stripeAccountId);
+          console.log('✅ Existing Stripe account verified:', stripeAccountId);
+        } catch (error) {
+          console.warn('⚠️ Stripe account not found in current project, creating new one...', error.message);
+          
+          // Account doesn't exist, create a new one
+          const { data: userProfile } = await supabaseAdmin
+            .from('user_profiles')
+            .select('*')
+            .eq('id', req.user.id)
+            .single();
+
+          const stripeAccount = await stripeService.createConnectAccount({
+            business_name: salon.business_name,
+            salon_id: salon.id,
+            owner_id: req.user.id,
+            email: salon.email || userProfile?.email,
+            country: salon.country || 'NL',
+            business_type: 'individual'
+          });
+
+          // Update salon with new Stripe account ID
+          await supabaseAdmin
+            .from('salons')
+            .update({
+              stripe_account_id: stripeAccount.id,
+              stripe_account_status: 'pending'
+            })
+            .eq('id', salon.id);
+
+          // Update Stripe account record
+          await supabaseAdmin
+            .from('stripe_accounts')
+            .update({
+              stripe_account_id: stripeAccount.id,
+              account_status: 'pending',
+              onboarding_completed: false,
+              updated_at: new Date().toISOString()
+            })
+            .eq('salon_id', salon.id);
+
+          stripeAccountId = stripeAccount.id;
+          console.log('✅ Created new Stripe account:', stripeAccountId);
+        }
       }
 
       // Redirect to web app after Stripe onboarding
@@ -835,7 +923,7 @@ class SalonController {
       }
 
       const accountLink = await stripeService.createAccountLink(
-        salon.stripe_account_id,
+        stripeAccountId,
         returnUrl,
         refreshUrl
       );
