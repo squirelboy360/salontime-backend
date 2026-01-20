@@ -53,11 +53,11 @@ HOW TO RESPOND:
 - Examples: "Hallo! Leuk je te spreken. Waar kan ik je mee helpen? Je kunt me vragen over je boekingen, een salon zoeken, of een afspraak maken." or "Hi! Hoe kan ik je vandaag helpen?"
 
 **DATA QUERIES** – Infer from the message, then call make_api_request FIRST:
-- Bookings/afspraken (toon boekingen, mijn afspraken, vandaag, show my bookings): GET /api/bookings, queryParams: { upcoming: "true" }. Show in <output> with ai-card, data-booking-id. If empty: say so and suggest searching salons or making a booking.
+- Bookings/afspraken (toon boekingen, mijn afspraken, vandaag, show my bookings): GET /api/bookings, queryParams: { upcoming: "true" }. For past/afgelopen/verleden: use queryParams: { upcoming: "false" }. Always show results in <output> with ai-card, data-booking-id. If empty: say so and suggest searching salons or making a booking.
 - Favorieten/favorites/opgeslagen: GET /api/favorites. Show in <output> with ai-card, data-salon-id. If empty: suggest exploring salons.
 - Salons/kappers/in de buurt: GET /api/salons/nearby with { latitude, longitude } if you have location, else GET /api/salons/popular. Show in <output> with data-salon-id.
 - Diensten/services/categorieën: GET /api/services/categories.
-- After you receive data, display it in HTML (<output>) or Markdown. Never a generic "verwerkt" message.
+- After you receive data, ALWAYS convert it to HTML (<output> cards) or Markdown. NEVER output raw JSON—the user must never see {"data": or {"bookings": in the chat. Never a generic "verwerkt" message.
 
 **OTHER QUESTIONS** (how-to, general info, opening hours, etc.):
 - Answer helpfully and specifically. Never say "Ik heb je verzoek verwerkt" – give a real answer or offer to look up data.
@@ -120,9 +120,9 @@ Choose the format that best fits the data:
 - HTML in <output> tags: For structured data, interactive UI, cards, lists that need styling
 - Markdown: For simple formatted text, informational responses, or when you just need basic formatting
 
-${contextInfo.length > 0 ? `Current User Context:\n${contextInfo.join('\n')}\n` : ''}All requests are authenticated for the current user. For bookings use queryParams { upcoming: "true" } unless the user asks for "past" or "all".
+${contextInfo.length > 0 ? `Current User Context:\n${contextInfo.join('\n')}\n` : ''}All requests are authenticated for the current user. Bookings: use queryParams { upcoming: "true" } for upcoming, { upcoming: "false" } for past/afgelopen/verleden.
 
-BOOKINGS (use queryParams { upcoming: "true" } for "my bookings"):
+BOOKINGS:
 - GET /api/bookings
 - GET /api/bookings/stats - Get booking statistics for current user
 - GET /api/bookings/available-slots?salon_id={id}&service_id={id}&date={YYYY-MM-DD} - Get available time slots
@@ -193,12 +193,84 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     if (messageLower.includes('dienst') || messageLower.includes('service') || messageLower.includes('categorie')) {
       return { endpoint: '/api/services/categories', queryParams: {} };
     }
-    // Bookings: default to upcoming
+    // Bookings: upcoming or past
     if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('afspraak')) {
-      return { endpoint: '/api/bookings', queryParams: { upcoming: 'true' } };
+      const wantPast = /past|afgelopen|verleden|earlier|vroeger/i.test(messageLower);
+      return { endpoint: '/api/bookings', queryParams: { upcoming: wantPast ? 'false' : 'true' } };
     }
     // Generic "show me" / "toon": default to upcoming bookings
     return { endpoint: '/api/bookings', queryParams: { upcoming: 'true' } };
+  }
+
+  /**
+   * If the AI echoed raw API JSON instead of generating HTML, parse it and return HTML.
+   * Returns null if aiResponse is not raw API-shaped JSON.
+   */
+  _convertRawJsonToHtml(aiResponse, message, userContext) {
+    if (!aiResponse || typeof aiResponse !== 'string') return null;
+    const t = aiResponse.trim();
+    if (!t.startsWith('{') || !t.endsWith('}')) return null;
+    if (!t.includes('"bookings"') && !t.includes('"salons"') && !t.includes('"favorites"') &&
+        !(t.includes('"data"') && (t.includes('bookings') || t.includes('salons') || t.includes('favorites'))))
+      return null;
+    let parsed;
+    try { parsed = JSON.parse(t); } catch (e) { return null; }
+
+    let dataArray = [];
+    const d = parsed.data || parsed;
+    if (Array.isArray(d)) dataArray = d;
+    else if (Array.isArray(d?.bookings)) dataArray = d.bookings;
+    else if (Array.isArray(d?.salons)) dataArray = d.salons;
+    else if (Array.isArray(d?.favorites)) dataArray = d.favorites;
+    else if (Array.isArray(d?.data)) dataArray = d.data;
+    else if (Array.isArray(parsed.bookings)) dataArray = parsed.bookings;
+    else if (Array.isArray(parsed.salons)) dataArray = parsed.salons;
+    else if (Array.isArray(parsed.favorites)) dataArray = parsed.favorites;
+    if (dataArray.length === 0) return null;
+
+    const msg = (message || '').toLowerCase();
+    const isBooking = dataArray[0] && (dataArray[0].appointment_date != null || dataArray[0].start_time != null ||
+      (dataArray[0].salon_id && (dataArray[0].salons || dataArray[0].salon)));
+    const isPast = /past|afgelopen|verleden|earlier|vroeger/i.test(msg);
+    const lang = userContext?.language === 'nl' ? 'nl' : 'en';
+
+    if (isBooking) {
+      const now = new Date();
+      const bookingCards = dataArray.slice(0, 20).map(booking => {
+        const salonName = booking.salon?.business_name || booking.salons?.business_name || booking.salonName || 'Salon';
+        const serviceName = booking.service?.name || booking.services?.name || booking.serviceName || 'Service';
+        const date = booking.appointment_date || booking.appointmentDate || '';
+        const time = (booking.start_time || booking.startTime || '').toString().slice(0, 5);
+        const bookingId = booking.id || '';
+        const status = booking.status || '';
+        const dt = date && time ? new Date(date + 'T' + time + ':00') : null;
+        const isUpcoming = dt ? dt >= now : false;
+        const isCancelled = status === 'cancelled';
+        const dataAttrs = `data-booking-id="${bookingId}" data-booking-status="${status}" data-is-upcoming="${isUpcoming}" data-is-cancelled="${isCancelled}"`;
+        const label = isCancelled ? ' (Geannuleerd)' : (isUpcoming ? '' : ' (Afgelopen)');
+        return `<div class="ai-card" ${dataAttrs} style="padding: 16px; margin: 8px 0; border: 1px solid #e0e0e0; border-radius: 8px; cursor: pointer;"><h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600;">${salonName}${label}</h3><p style="margin: 4px 0; color: #666; font-size: 14px;">${serviceName}</p><p style="margin: 4px 0; color: #666; font-size: 14px;">📅 ${date} om ${time}</p></div>`;
+      }).join('');
+
+      const heading = isPast
+        ? (lang === 'nl' ? `Je afgelopen boekingen (${dataArray.length}):` : `Your past bookings (${dataArray.length}):`)
+        : (lang === 'nl' ? `Je hebt ${dataArray.length} boeking(en):` : `You have ${dataArray.length} booking(s):`);
+      return `<output><p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">${heading}</p>${bookingCards}</output>`;
+    }
+
+    // Generic: salons, favorites, services
+    const isFav = /favoriet|favorite|opgeslagen/i.test(msg);
+    const isSalon = /salon|kapper/i.test(msg);
+    const isService = /dienst|service|categorie/i.test(msg);
+    const dataCards = dataArray.slice(0, 20).map((item, index) => {
+      const salon = item.salons || item.salon;
+      const sid = item.salon_id || salon?.id || (isSalon || isFav ? item.id : null);
+      const title = salon?.business_name || item.business_name || item.name || item.title || `Item ${index + 1}`;
+      const dataAttr = (isFav || isSalon) && (sid || item.id) ? `data-salon-id="${sid || item.id}"` : `data-id="${item.id || ''}"`;
+      const sub = (isFav || isSalon) && (item.city || salon?.city) ? ` · ${item.city || salon?.city}` : '';
+      return `<div class="ai-card" ${dataAttr} style="padding: 16px; margin: 8px 0; border: 1px solid #e0e0e0; border-radius: 8px; cursor: pointer;"><h3 style="margin: 0; font-size: 16px; font-weight: 600;">${title}${sub}</h3></div>`;
+    }).join('');
+    const heading = isFav ? (lang === 'nl' ? 'Favorieten' : 'Favorites') : isSalon ? (lang === 'nl' ? 'Salons' : 'Salons') : isService ? (lang === 'nl' ? 'Categorieën / diensten' : 'Categories / services') : (lang === 'nl' ? 'Gevonden resultaten' : 'Results');
+    return `<output><p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">${heading} (${dataArray.length}):</p>${dataCards}</output>`;
   }
 
   // Make authenticated API request on behalf of user
@@ -272,7 +344,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
         functionDeclarations: [
           {
             name: 'make_api_request',
-            description: `Fetch data to answer the user. Infer intent from their message, then call the right endpoint. Examples: bookings/afspraken → GET /api/bookings, queryParams: { upcoming: "true" }; favorites/favorieten → GET /api/favorites; salons/kappers/in de buurt → GET /api/salons/nearby with queryParams: { latitude, longitude } (location: ${locationInfo}), or GET /api/salons/popular if no location; diensten/categorieën → GET /api/services/categories. All requests are authenticated.`,
+            description: `Fetch data to answer the user. Infer intent, then call the right endpoint. NEVER return raw JSON—always convert to HTML <output> or Markdown. Examples: bookings/afspraken → GET /api/bookings, queryParams: { upcoming: "true" }; past/afgelopen/verleden bookings → { upcoming: "false" }; favorites/favorieten → GET /api/favorites; salons/kappers → /api/salons/nearby with { latitude, longitude } or /api/salons/popular; diensten/categorieën → GET /api/services/categories. All requests are authenticated.`,
             parameters: {
               type: 'OBJECT',
               properties: {
@@ -283,7 +355,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
                 },
                 endpoint: {
                   type: 'STRING',
-                  description: 'Path only, e.g. /api/bookings, /api/favorites, /api/salons/nearby, /api/salons/popular, /api/services/categories. For bookings use queryParams { upcoming: "true" }; for /api/salons/nearby use { latitude, longitude }.'
+                  description: 'Path only, e.g. /api/bookings, /api/favorites, /api/salons/nearby, /api/salons/popular. Bookings: { upcoming: "true" } or { upcoming: "false" } for past. For /api/salons/nearby use { latitude, longitude }. Never return raw JSON—always render as HTML or Markdown.'
                 },
                 body: {
                   type: 'OBJECT',
@@ -870,8 +942,9 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
             console.log('📦 Generating HTML directly from', dataArray.length, 'items');
             
             // Generate HTML cards for bookings
-            if (messageLowerCheck.includes('booking') || messageLowerCheck.includes('boeking') || messageLowerCheck.includes('gepland')) {
+            if (messageLowerCheck.includes('booking') || messageLowerCheck.includes('boeking') || messageLowerCheck.includes('gepland') || messageLowerCheck.includes('afspraak')) {
               const now = new Date();
+              const isPastRequest = /past|afgelopen|verleden|earlier|vroeger/i.test(messageLowerCheck);
               const bookingCards = dataArray.slice(0, 10).map(booking => {
                 const salonName = booking.salon?.business_name || booking.salons?.business_name || booking.salon_name || 'Salon';
                 const serviceName = booking.service?.name || booking.services?.name || booking.service_name || 'Service';
@@ -900,10 +973,12 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
                 const dt = new Date(d + 'T' + (t.length >= 5 ? t.slice(0, 5) : t) + ':00');
                 return dt >= now && (b.status || '') !== 'cancelled';
               }).length;
-              const sub = upcomingCount < dataArray.length ? ` (${upcomingCount} komend)` : '';
-              
+              const sub = !isPastRequest && upcomingCount < dataArray.length ? ` (${upcomingCount} komend)` : '';
+              const heading = isPastRequest
+                ? (userContext?.language === 'nl' ? `Je afgelopen boekingen (${dataArray.length}):` : `Your past bookings (${dataArray.length}):`)
+                : (userContext?.language === 'nl' ? `Je hebt ${dataArray.length} boeking(en)${sub}:` : `You have ${dataArray.length} booking(s)${sub}:`);
               aiResponse = `<output>
-                <p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">Je hebt ${dataArray.length} boeking(en)${sub}:</p>
+                <p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">${heading}</p>
                 ${bookingCards}
               </output>`;
             } else {
@@ -981,6 +1056,15 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
           .map(part => part.text);
         if (textParts.length > 0) {
           aiResponse = textParts.join('');
+        }
+      }
+
+      // If the AI echoed raw API JSON instead of HTML, convert it to <output> cards
+      if (aiResponse && !aiResponse.includes('<output>')) {
+        const converted = this._convertRawJsonToHtml(aiResponse, message, userContext);
+        if (converted) {
+          aiResponse = converted;
+          console.log('🔄 Converted raw JSON in AI response to HTML cards');
         }
       }
       
