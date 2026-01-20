@@ -52,13 +52,12 @@ HOW TO RESPOND:
 - Do NOT call make_api_request. Just respond warmly.
 - Examples: "Hallo! Leuk je te spreken. Waar kan ik je mee helpen? Je kunt me vragen over je boekingen, een salon zoeken, of een afspraak maken." or "Hi! Hoe kan ik je vandaag helpen?"
 
-**DATA QUERIES** – Use your judgment and the conversation. Infer from the full message and from what you just showed or discussed:
-- What they want: bookings, salons, favorites, services, reviews, etc.
-- Time/scope: past, upcoming, today, yesterday, all, everything, other days, last week, etc.
-- Amount: all / everything / alle → use limit (e.g. 500) when the API supports it; a few / some → default limits are fine.
-- Filters: date, location, status, search query—map to the endpoint’s query params.
-- **FOLLOW-UPS** (e.g. "Which is the closest?", "What about other days?", "the first one", "tell me more about X"): answer from the data you already have in this conversation. Do NOT respond with "How can I help you? You can ask about your bookings...". Use the last list/cards you showed, or call make_api_request only if you need fresh data.
-Then call make_api_request when you need data. Params: /api/bookings → upcoming ("true"|"false"), limit, page; for past/yesterday/other days/all use upcoming "false" and limit 500. For yesterday, filter the returned list to yesterday's date before showing. /api/salons/search, /api/salons/nearby → lat, lng, sort; /api/favorites, /api/services/categories. After you get data, render as HTML <output> (ai-card, data-booking-id or data-salon-id) or Markdown. NEVER output raw JSON.
+**DATA QUERIES** – Understand intent from the full message and conversation, in any wording or language (like ChatGPT). Infer:
+- What they want: bookings, salons, favorites, services, etc.
+- Time/scope: past, upcoming, a specific date, "other times", "last week", "what I had on X", etc.
+- Amount: "all", "everything", "my whole history" → use a high limit (e.g. 500) where the API supports it.
+- **FOLLOW-UPS** ("Which is the closest?", "what about other days?", "the first one"): answer from data you already showed in this conversation. Do NOT reply with a generic "How can I help you? You can ask about...". Only call make_api_request when you need fresh data.
+Call make_api_request when you need data. Params: /api/bookings → upcoming "true"|"false", limit, page; /api/salons/search, /api/salons/nearby → lat, lng, sort; /api/favorites, /api/services/categories. After you get data, render as HTML <output> (ai-card, data-booking-id or data-salon-id) or Markdown. NEVER output raw JSON.
 
 **OTHER QUESTIONS** (how-to, general info, opening hours, etc.):
 - Answer helpfully and specifically. Never say "Ik heb je verzoek verwerkt" – give a real answer or offer to look up data.
@@ -176,54 +175,6 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
   }
 
   /**
-   * Pick endpoint and queryParams for a forced API call based on message and user context.
-   * Used when the AI doesn't call make_api_request so we can still fetch the right data.
-   */
-  _getForcedEndpointAndQuery(messageLower, userContext = null) {
-    const loc = userContext?.location;
-    const hasCoords = loc && loc.latitude != null && loc.longitude != null;
-
-    // Favorites / favorieten
-    if (messageLower.includes('favoriet') || messageLower.includes('favorite') || messageLower.includes('opgeslagen')) {
-      return { endpoint: '/api/favorites', queryParams: {} };
-    }
-    // Salons / kappers: nearby if we have coords, else popular
-    if (messageLower.includes('salon') || messageLower.includes('kapper')) {
-      if (hasCoords) {
-        return { endpoint: '/api/salons/nearby', queryParams: { latitude: String(loc.latitude), longitude: String(loc.longitude) } };
-      }
-      return { endpoint: '/api/salons/popular', queryParams: {} };
-    }
-    // Services / diensten / categories (no salon_id: use categories)
-    if (messageLower.includes('dienst') || messageLower.includes('service') || messageLower.includes('categorie')) {
-      return { endpoint: '/api/services/categories', queryParams: {} };
-    }
-    // Bookings: yesterday / gisteren -> past, high limit, then filter to yesterday in HTML step
-    if (messageLower.includes('yesterday') || messageLower.includes('gisteren')) {
-      return { endpoint: '/api/bookings', queryParams: { upcoming: 'false', limit: '500' } };
-    }
-    // Bookings: "other days", "others days", "andere dagen" -> past, high limit
-    if (messageLower.includes('other days') || messageLower.includes('others days') || messageLower.includes('other day') || messageLower.includes('andere dagen')) {
-      return { endpoint: '/api/bookings', queryParams: { upcoming: 'false', limit: '500' } };
-    }
-    // Bookings: past / afgelopen / verleden -> past, high limit
-    if (messageLower.includes('past') || messageLower.includes('afgelopen') || messageLower.includes('verleden')) {
-      return { endpoint: '/api/bookings', queryParams: { upcoming: 'false', limit: '500' } };
-    }
-    // Bookings: "all" / "alle" (in booking context) -> past, high limit
-    if (/\b(all|alle)\b/.test(messageLower) &&
-        (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('afspraak'))) {
-      return { endpoint: '/api/bookings', queryParams: { upcoming: 'false', limit: '500' } };
-    }
-    // Bookings: default -> upcoming
-    if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('afspraak')) {
-      return { endpoint: '/api/bookings', queryParams: { upcoming: 'true', limit: '100' } };
-    }
-    // Generic: default to upcoming bookings
-    return { endpoint: '/api/bookings', queryParams: { upcoming: 'true', limit: '100' } };
-  }
-
-  /**
    * If the AI echoed raw API JSON instead of generating HTML, parse it and return HTML.
    * Returns null if aiResponse is not raw API-shaped JSON.
    */
@@ -249,31 +200,12 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     else if (Array.isArray(parsed.favorites)) dataArray = parsed.favorites;
     if (dataArray.length === 0) return null;
 
-    const msg = (message || '').toLowerCase();
     const isBooking = dataArray[0] && (dataArray[0].appointment_date != null || dataArray[0].start_time != null ||
       (dataArray[0].salon_id && (dataArray[0].salons || dataArray[0].salon)));
     const lang = userContext?.language === 'nl' ? 'nl' : 'en';
 
     if (isBooking) {
-      const wantToday = /vandaag|today/i.test(msg);
-      const wantYesterday = /yesterday|gisteren/i.test(msg);
-      const todayStr = new Date().toISOString().split('T')[0];
-      const yesterdayStr = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; })();
-      const forToday = wantToday ? dataArray.filter(b => String(b.appointment_date || b.appointmentDate || '').startsWith(todayStr)) : dataArray;
-      const forYesterday = wantYesterday ? dataArray.filter(b => String(b.appointment_date || b.appointmentDate || '').startsWith(yesterdayStr)) : dataArray;
-
-      if (wantToday && forToday.length === 0) {
-        return lang === 'nl'
-          ? 'Je hebt vandaag geen boekingen. Je kunt een salon zoeken of een afspraak maken.'
-          : 'You have no bookings for today. You can search for a salon or make an appointment.';
-      }
-      if (wantYesterday && forYesterday.length === 0) {
-        return lang === 'nl'
-          ? 'Je had gisteren geen boekingen. Je kunt een salon zoeken of een afspraak maken.'
-          : 'You had no bookings yesterday. You can search for a salon or make an appointment.';
-      }
-
-      const toShow = (wantToday ? forToday : wantYesterday ? forYesterday : dataArray).slice(0, 100);
+      const toShow = dataArray.slice(0, 100);
       const now = new Date();
       const bookingCards = toShow.map(booking => {
         const salonName = booking.salon?.business_name || booking.salons?.business_name || booking.salonName || 'Salon';
@@ -294,20 +226,17 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
       return `<output><p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">${heading}</p>${bookingCards}</output>`;
     }
 
-    // Generic: salons, favorites, services
-    const isFav = /favoriet|favorite|opgeslagen/i.test(msg);
-    const isSalon = /salon|kapper/i.test(msg);
-    const isService = /dienst|service|categorie/i.test(msg);
-    const dataCards = dataArray.slice(0, 20).map((item, index) => {
+    // Generic: salons, favorites, services – infer from data shape, not keywords
+    const dataCards = dataArray.slice(0, 100).map((item, index) => {
       const salon = item.salons || item.salon;
-      const sid = item.salon_id || salon?.id || (isSalon || isFav ? item.id : null);
+      const sid = item.salon_id || salon?.id || (salon ? item.id : null);
       const title = salon?.business_name || item.business_name || item.name || item.title || `Item ${index + 1}`;
-      const dataAttr = (isFav || isSalon) && (sid || item.id) ? `data-salon-id="${sid || item.id}"` : `data-id="${item.id || ''}"`;
-      const sub = (isFav || isSalon) && (item.city || salon?.city) ? ` · ${item.city || salon?.city}` : '';
+      const dataAttr = sid ? `data-salon-id="${sid}"` : `data-id="${item.id || ''}"`;
+      const sub = (item.city || salon?.city) ? ` · ${item.city || salon?.city}` : '';
       return `<div class="ai-card" ${dataAttr} style="padding: 16px; margin: 8px 0; border: 1px solid #e0e0e0; border-radius: 8px; cursor: pointer;"><h3 style="margin: 0; font-size: 16px; font-weight: 600;">${title}${sub}</h3></div>`;
     }).join('');
-    const heading = isFav ? (lang === 'nl' ? 'Favorieten' : 'Favorites') : isSalon ? (lang === 'nl' ? 'Salons' : 'Salons') : isService ? (lang === 'nl' ? 'Categorieën / diensten' : 'Categories / services') : (lang === 'nl' ? 'Gevonden resultaten' : 'Results');
-    return `<output><p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">${heading} (${dataArray.length}):</p>${dataCards}</output>`;
+    const heading = lang === 'nl' ? `Gevonden resultaten (${dataArray.length})` : `Results (${dataArray.length})`;
+    return `<output><p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">${heading}:</p>${dataCards}</output>`;
   }
 
   // Make authenticated API request on behalf of user
@@ -381,7 +310,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
         functionDeclarations: [
           {
             name: 'make_api_request',
-            description: `Fetch data when the user needs it. For follow-ups about what you just showed ("which is the closest?", "what about other days?", "the first one"), answer from the conversation—only call this when you need new data. Otherwise: infer what they want (bookings, salons, favorites, etc.), time/scope (past, upcoming, today, yesterday, other days, all), amount (all→limit 500). /api/bookings: upcoming "true"|"false", limit, page. /api/salons/nearby: latitude, longitude. /api/salons/search: q, lat, lng, sort. /api/favorites, /api/services/categories. Render as HTML <output> or Markdown, never raw JSON. Location: ${locationInfo}.`,
+            description: `Fetch data when you need it. Understand intent in any wording or language—we do not use keyword matching. For follow-ups about what you just showed, answer from the conversation; only call this when you need new data. Otherwise: infer what they want (bookings, salons, favorites, etc.), time/scope (past, upcoming, a date, "other times", "all"), and amount (use limit 500 for "all" or "everything"). /api/bookings: upcoming "true"|"false", limit, page. /api/salons/nearby: latitude, longitude. /api/salons/search: q, lat, lng, sort. /api/favorites, /api/services/categories. Render as HTML <output> or Markdown, never raw JSON. Location: ${locationInfo}.`,
             parameters: {
               type: 'OBJECT',
               properties: {
@@ -792,22 +721,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
       }
       
       console.log('🔍 Initial function calls:', currentFunctionCalls.length);
-      
-      // CRITICAL: If user asks for data but AI didn't make function calls, force it
-      const messageLowerForced = message.toLowerCase();
-      const isDataQueryForced = /booking|boeking|show me|toon|salon|kapper|gepland|appointment|vandaag|today|yesterday|gisteren|(other|others)\s+days?|andere dagen|favoriet|favorite|opgeslagen|dienst|service|categorie/i.test(messageLowerForced);
-      
-      if (isDataQueryForced && currentFunctionCalls.length === 0) {
-        console.log('⚠️ Data query detected but NO function calls made! Forcing function call...');
-        const { endpoint: forcedEndpoint, queryParams: forcedQuery } = this._getForcedEndpointAndQuery(messageLowerForced, userContext);
-        const forcedFunctionCall = {
-          name: 'make_api_request',
-          args: { method: 'GET', endpoint: forcedEndpoint, body: null, queryParams: forcedQuery }
-        };
-        currentFunctionCalls = [forcedFunctionCall];
-        console.log('🔧 Forced function call created:', forcedEndpoint, JSON.stringify(forcedQuery));
-      }
-      
+
       while (currentFunctionCalls && currentFunctionCalls.length > 0 && functionCallCount < maxFunctionCallIterations) {
         functionCallCount++;
         console.log(`🔄 Function call iteration ${functionCallCount}, calls: ${currentFunctionCalls.length}`);
@@ -877,40 +791,19 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
             const hasHTML = responseText.includes('<output>') || responseText.includes('<div class="ai-card"') || responseText.includes('ai-card');
             
             if (!hasHTML) {
-              // Force HTML generation with the actual data
-              const messageLower = message.toLowerCase();
-              let htmlPrompt = '';
-              
-              // Safely extract array data from response (API can return { data: { bookings, pagination } })
               let dataArray = [];
               if (Array.isArray(lastResponseData)) {
                 dataArray = lastResponseData;
               } else if (lastResponseData && typeof lastResponseData === 'object') {
-                if (Array.isArray(lastResponseData.data?.bookings)) {
-                  dataArray = lastResponseData.data.bookings;
-                } else if (Array.isArray(lastResponseData.data)) {
-                  dataArray = lastResponseData.data;
-                } else if (Array.isArray(lastResponseData.bookings)) {
-                  dataArray = lastResponseData.bookings;
-                } else if (Array.isArray(lastResponseData.salons)) {
-                  dataArray = lastResponseData.salons;
-                } else if (lastResponseData.success && Array.isArray(lastResponseData.data)) {
-                  dataArray = lastResponseData.data;
-                }
+                if (Array.isArray(lastResponseData.data?.bookings)) dataArray = lastResponseData.data.bookings;
+                else if (Array.isArray(lastResponseData.data?.salons)) dataArray = lastResponseData.data.salons;
+                else if (Array.isArray(lastResponseData.data)) dataArray = lastResponseData.data;
+                else if (Array.isArray(lastResponseData.bookings)) dataArray = lastResponseData.bookings;
+                else if (Array.isArray(lastResponseData.salons)) dataArray = lastResponseData.salons;
+                else if (lastResponseData.success && Array.isArray(lastResponseData.data)) dataArray = lastResponseData.data;
               }
-              
-              // Ensure we have an array before using slice
-              const safeArray = Array.isArray(dataArray) ? dataArray : [];
-              const limitedData = safeArray.slice(0, 5);
-              
-              // Let the LLM naturally understand and process the data based on the user's question
-              // Don't hardcode filtering - trust the LLM to understand context
-              htmlPrompt = `De gebruiker vroeg: "${message}". Je hebt data opgehaald: ${JSON.stringify(limitedData)}. 
-
-Analyseer de vraag van de gebruiker natuurlijk en toon alleen de relevante data. Als de gebruiker vraagt naar "vandaag" of "today", filter dan voor vandaag's datum. Als ze vragen naar specifieke informatie, filter dan dienovereenkomstig.
-
-Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id voor navigatie. Wrap alles in <output> tags. Geef een natuurlijk, contextueel antwoord dat de vraag beantwoordt.`;
-              
+              const limitedData = (Array.isArray(dataArray) ? dataArray : []).slice(0, 10);
+              const htmlPrompt = `The user asked: "${message}". You have this data: ${JSON.stringify(limitedData)}. Display it in HTML in <output> tags with ai-card elements. Use data-booking-id for bookings, data-salon-id for salons. Filter or format according to what the user asked.`;
               const htmlResult = await chat.sendMessage(htmlPrompt);
               const htmlResponse = htmlResult.response;
               if (typeof htmlResponse.text === 'function') {
@@ -927,152 +820,8 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
 
       // Get text response - handle different response formats
       let aiResponse = '';
-      
-      // CRITICAL: If user asked for data but no function calls were made, force them now
-      const messageLowerCheck = message.toLowerCase();
-      const isDataQuery = /booking|boeking|show me|toon|salon|kapper|gepland|appointment|vandaag|today|yesterday|gisteren|(other|others)\s+days?|andere dagen|favoriet|favorite|opgeslagen|dienst|service|categorie/i.test(messageLowerCheck);
-      
-      if (isDataQuery && functionCallCount === 0) {
-        console.log('🚨 CRITICAL: Data query detected but NO function calls made! Forcing function call...');
-        const { endpoint: forcedEndpoint, queryParams } = this._getForcedEndpointAndQuery(messageLowerCheck, userContext);
-        try {
-          const apiResponse = await this.makeApiRequest(
-            userId,
-            userToken,
-            'GET',
-            forcedEndpoint,
-            null,
-            queryParams
-          );
-          
-          // Store the response
-          allFunctionResponses = [{
-            functionResponse: {
-              name: 'make_api_request',
-              response: {
-                success: apiResponse.success,
-                status: apiResponse.status,
-                data: apiResponse.data
-              }
-            }
-          }];
-          
-          console.log('✅ Forced function call completed, data received:', apiResponse.data ? (Array.isArray(apiResponse.data) ? `Array(${apiResponse.data.length})` : typeof apiResponse.data) : 'null');
-          
-          // Now force the AI to display the data – support all common API shapes
-          const lastResponseData = apiResponse.data;
-          let dataArray = [];
-          if (Array.isArray(lastResponseData)) {
-            dataArray = lastResponseData;
-          } else if (lastResponseData && typeof lastResponseData === 'object') {
-            if (Array.isArray(lastResponseData.data?.bookings)) dataArray = lastResponseData.data.bookings;
-            else if (Array.isArray(lastResponseData.data?.salons)) dataArray = lastResponseData.data.salons;
-            else if (Array.isArray(lastResponseData.data)) dataArray = lastResponseData.data;
-            else if (Array.isArray(lastResponseData.bookings)) dataArray = lastResponseData.bookings;
-            else if (Array.isArray(lastResponseData.salons)) dataArray = lastResponseData.salons;
-            else if (Array.isArray(lastResponseData.favorites)) dataArray = lastResponseData.favorites;
-          }
-          
-          // Generate HTML directly from the data - don't trust the AI to do it
-          if (dataArray.length > 0) {
-            console.log('📦 Generating HTML directly from', dataArray.length, 'items');
-            
-            // Generate HTML cards for bookings (including yesterday, other/others days → we fetch past and filter or show all)
-            if (messageLowerCheck.includes('booking') || messageLowerCheck.includes('boeking') || messageLowerCheck.includes('gepland') || messageLowerCheck.includes('afspraak') || messageLowerCheck.includes('yesterday') || messageLowerCheck.includes('gisteren') || /(other|others)\s+days?|andere dagen/.test(messageLowerCheck)) {
-              const wantToday = /vandaag|today/i.test(messageLowerCheck);
-              const wantYesterday = /yesterday|gisteren/i.test(messageLowerCheck);
-              const todayStr = new Date().toISOString().split('T')[0];
-              const yesterdayStr = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; })();
-              const forToday = wantToday ? dataArray.filter(b => String(b.appointment_date || b.appointmentDate || '').startsWith(todayStr)) : dataArray;
-              const forYesterday = wantYesterday ? dataArray.filter(b => String(b.appointment_date || b.appointmentDate || '').startsWith(yesterdayStr)) : dataArray;
 
-              if (wantToday && forToday.length === 0) {
-                aiResponse = userContext?.language === 'nl'
-                  ? 'Je hebt vandaag geen boekingen. Je kunt een salon zoeken of een afspraak maken.'
-                  : 'You have no bookings for today. You can search for a salon or make an appointment.';
-              } else if (wantYesterday && forYesterday.length === 0) {
-                aiResponse = userContext?.language === 'nl'
-                  ? 'Je had gisteren geen boekingen. Je kunt een salon zoeken of een afspraak maken.'
-                  : 'You had no bookings yesterday. You can search for a salon or make an appointment.';
-              } else {
-              const toShow = (wantToday ? forToday : wantYesterday ? forYesterday : dataArray).slice(0, 100);
-              const now = new Date();
-              const bookingCards = toShow.map(booking => {
-                const salonName = booking.salon?.business_name || booking.salons?.business_name || booking.salon_name || 'Salon';
-                const serviceName = booking.service?.name || booking.services?.name || booking.service_name || 'Service';
-                const date = booking.appointment_date || booking.appointmentDate || '';
-                const time = booking.start_time || booking.startTime || '';
-                const bookingId = booking.id || '';
-                const status = booking.status || '';
-                const dt = date && time ? new Date(date + 'T' + (time.length >= 5 ? time.slice(0, 5) : time) + ':00') : null;
-                const isUpcoming = dt ? dt >= now : true;
-                const isCancelled = status === 'cancelled';
-                const dataAttrs = `data-booking-id="${bookingId}" data-booking-status="${status}" data-is-upcoming="${isUpcoming}" data-is-cancelled="${isCancelled}"`;
-                const label = isCancelled ? ' (Geannuleerd)' : (isUpcoming ? '' : ' (Afgelopen)');
-                
-                return `
-                  <div class="ai-card" ${dataAttrs} style="padding: 16px; margin: 8px 0; border: 1px solid #e0e0e0; border-radius: 8px; cursor: pointer;">
-                    <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600;">${salonName}${label}</h3>
-                    <p style="margin: 4px 0; color: #666; font-size: 14px;">${serviceName}</p>
-                    <p style="margin: 4px 0; color: #666; font-size: 14px;">📅 ${date} om ${time}</p>
-                  </div>
-                `;
-              }).join('');
-              
-              const upcomingCount = toShow.filter(b => {
-                const d = b.appointment_date || b.appointmentDate, t = b.start_time || b.startTime;
-                if (!d || !t) return false;
-                const dt = new Date(d + 'T' + (t.length >= 5 ? t.slice(0, 5) : t) + ':00');
-                return dt >= now && (b.status || '') !== 'cancelled';
-              }).length;
-              const sub = upcomingCount < toShow.length ? ` (${upcomingCount} komend)` : '';
-              const heading = userContext?.language === 'nl' ? `Je hebt ${toShow.length} boeking(en)${sub}:` : `You have ${toShow.length} booking(s)${sub}:`;
-              aiResponse = `<output>
-                <p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">${heading}</p>
-                ${bookingCards}
-              </output>`;
-              }
-            } else {
-              // Generic data display: salons, favorites, services/categories, or any list
-              const isFav = /favoriet|favorite|opgeslagen/i.test(messageLowerCheck);
-              const isSalon = /salon|kapper/i.test(messageLowerCheck);
-              const isService = /dienst|service|categorie/i.test(messageLowerCheck);
-              const dataCards = dataArray.slice(0, 10).map((item, index) => {
-                const salon = item.salons || item.salon;
-                const sid = item.salon_id || salon?.id || (isSalon || isFav ? item.id : null);
-                const title = salon?.business_name || item.business_name || item.name || item.title || `Item ${index + 1}`;
-                const id = item.id || sid || '';
-                const useSalonId = (isFav || isSalon) && (sid || item.id);
-                const dataAttr = useSalonId ? `data-salon-id="${sid || item.id}"` : `data-id="${id}"`;
-                const sub = (isFav || isSalon) && (item.city || salon?.city) ? ` · ${item.city || salon?.city}` : '';
-                return `
-                  <div class="ai-card" ${dataAttr} style="padding: 16px; margin: 8px 0; border: 1px solid #e0e0e0; border-radius: 8px; cursor: pointer;">
-                    <h3 style="margin: 0; font-size: 16px; font-weight: 600;">${title}${sub}</h3>
-                  </div>
-                `;
-              }).join('');
-              const heading = isFav ? 'Favorieten' : isSalon ? 'Salons' : isService ? 'Categorieën / diensten' : 'Gevonden resultaten';
-              aiResponse = `<output>
-                <p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">${heading} (${dataArray.length}):</p>
-                ${dataCards}
-              </output>`;
-            }
-          } else {
-            // No data found
-            if (/booking|boeking|gepland|afspraak|yesterday|gisteren|(other|others)\s+days?|andere dagen/i.test(messageLowerCheck)) aiResponse = 'Je hebt geen boekingen gevonden.';
-            else if (/favoriet|favorite|opgeslagen/i.test(messageLowerCheck)) aiResponse = 'Je hebt nog geen favoriete salons.';
-            else if (/salon|kapper/i.test(messageLowerCheck)) aiResponse = 'Geen salons gevonden.';
-            else aiResponse = 'Geen resultaten gevonden.';
-          }
-          
-          console.log('✅ Generated HTML response directly, length:', aiResponse.length);
-          functionCallCount = 1; // Mark that we made a function call
-        } catch (error) {
-          console.error('❌ Forced function call failed:', error);
-        }
-      }
-      
-      // Try multiple ways to extract text from response (only if we didn't already generate it)
+      // Try multiple ways to extract text from response
       if (!aiResponse) {
         try {
           if (typeof response.text === 'function') {
@@ -1190,41 +939,11 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
                 }
               }
               dataArray = Array.isArray(responseData) ? responseData : [];
-              
-              const messageLower = message.toLowerCase();
-              let followUpPrompt = '';
-              
-              if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('vandaag')) {
-                if (dataArray.length > 0) {
-                  const today = new Date().toISOString().split('T')[0];
-                  const wantToday = /vandaag|today/i.test(messageLower);
-                  const filteredBookings = wantToday ? dataArray.filter(b => (String(b.appointment_date || b.appointmentDate || b.date || '')).startsWith(today)) : dataArray;
-
-                  if (filteredBookings.length > 0) {
-                    followUpPrompt = `De gebruiker vroeg naar boekingen. Je hebt ${filteredBookings.length} booking(s) gevonden voor vandaag. Toon ZEKER deze boekingen in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(filteredBookings.slice(0, 10))}. Maak ai-card elementen voor elke booking met data-booking-id. Begin met een korte samenvatting zoals "Je hebt ${filteredBookings.length} boeking(en) vandaag:" en toon dan de cards.`;
-                  } else if (wantToday) {
-                    followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen voor vandaag. Zeg ALLEEN: "Je hebt vandaag geen boekingen. Je kunt een salon zoeken of een afspraak maken." Toon GEEN <output> cards en GEEN andere (aanstaande) boekingen.';
-                  } else {
-                    followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen gevonden. Zeg dit duidelijk in het Nederlands.';
-                  }
-                } else {
-                  followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen gevonden. Zeg dit duidelijk in het Nederlands.';
-                }
-              } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
-                if (dataArray.length > 0) {
-                  followUpPrompt = `Je hebt ${dataArray.length} salon(s) opgehaald. Toon NU de salons in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(dataArray.slice(0, 10))}. Maak ai-card elementen voor elke salon met data-salon-id.`;
-                } else {
-                  followUpPrompt = 'Je hebt de salons opgehaald maar er zijn geen salons gevonden. Zeg dit duidelijk in het Nederlands.';
-                }
-              } else {
-                if (dataArray.length > 0) {
-                  followUpPrompt = `Je hebt data opgehaald. Toon NU de data in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(dataArray.slice(0, 10))}.`;
-                } else {
-                  followUpPrompt = 'Je hebt de data opgehaald maar er is niets gevonden. Zeg dit duidelijk in het Nederlands.';
-                }
-              }
-              
-              console.log('🔄 Sending follow-up prompt to force data display:', followUpPrompt.substring(0, 100));
+              const limited = dataArray.slice(0, 10);
+              const followUpPrompt = dataArray.length > 0
+                ? `The user asked: "${message}". You have this data: ${JSON.stringify(limited)}. Display it in HTML in <output> tags with ai-card. Use data-booking-id for bookings, data-salon-id for salons. Match the user's intent (filter by date, type, etc. if they asked).`
+                : (userContext?.language === 'nl' ? 'Je hebt geen data gevonden. Zeg dat duidelijk.' : 'No data found. Say so clearly.');
+              console.log('🔄 Sending follow-up to force data display');
               
               const followUpResult = await chat.sendMessage(followUpPrompt);
               const followUpResponse = followUpResult.response;
@@ -1240,39 +959,30 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
               
               console.log('✅ Follow-up response received:', aiResponse.substring(0, 200));
             } catch (e) {
-            console.error('❌ Follow-up prompt failed:', e);
-            // If follow-up fails, provide a helpful default message based on the request
-            const messageLower = message.toLowerCase();
-            
-            if (dataArray.length > 0) {
-              const wantToday = /vandaag|today/i.test(messageLower);
-              const todayStr = new Date().toISOString().split('T')[0];
-              const forToday = wantToday ? dataArray.filter(b => String(b.appointment_date || b.appointmentDate || b.date || '').startsWith(todayStr)) : dataArray;
-
-              if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('vandaag')) {
-                if (wantToday && forToday.length === 0) {
-                  aiResponse = 'Je hebt vandaag geen boekingen. Je kunt een salon zoeken of een afspraak maken.';
+              console.error('❌ Follow-up prompt failed:', e);
+              if (dataArray.length > 0) {
+                const isBooking = dataArray[0] && (dataArray[0].appointment_date != null || dataArray[0].start_time != null);
+                const toShow = dataArray.slice(0, 10);
+                if (isBooking) {
+                  const cards = toShow.map(b => {
+                    const name = b.salon?.business_name || b.salons?.business_name || b.salonName || 'Salon';
+                    const time = (b.start_time || b.startTime || '').toString().slice(0, 5);
+                    const bid = b.id || '';
+                    return `<div class="ai-card" data-booking-id="${bid}" style="padding:12px;margin:8px 0;border:1px solid #e0e0e0;border-radius:8px;"><strong>${name}</strong> – ${time}</div>`;
+                  }).join('');
+                  aiResponse = `<output><p>${userContext?.language === 'nl' ? 'Gevonden:' : 'Found:'}</p>${cards}</output>`;
                 } else {
-                  const toShow = (wantToday ? forToday : dataArray).slice(0, 5);
-                  aiResponse = '<output><p>Je hebt de volgende boekingen vandaag:</p><ul>' + 
-                    toShow.map(b => {
-                      const salonName = b.salon_name || b.salonName || b.salon?.name || 'Salon';
-                      const time = b.start_time || b.startTime || b.appointment_time || '';
-                      return `<li><strong>${salonName}</strong> om ${time}</li>`;
-                    }).join('') + 
-                    '</ul></output>';
+                  const cards = toShow.map(it => {
+                    const sid = it.salon_id || it.salons?.id || it.id;
+                    const name = it.salons?.business_name || it.salon?.business_name || it.business_name || it.name || 'Item';
+                    return `<div class="ai-card" data-salon-id="${sid || ''}" style="padding:12px;margin:8px 0;border:1px solid #e0e0e0;border-radius:8px;">${name}</div>`;
+                  }).join('');
+                  aiResponse = `<output><p>${userContext?.language === 'nl' ? 'Gevonden:' : 'Found:'}</p>${cards}</output>`;
                 }
               } else {
-                aiResponse = '<output><p>Hier is de opgehaalde informatie:</p></output>';
-              }
-            } else {
-              if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('vandaag')) {
-                aiResponse = 'Je hebt vandaag geen boekingen. Je kunt een salon zoeken of een afspraak maken.';
-              } else {
-                aiResponse = 'Ik heb de informatie opgehaald maar er is niets gevonden.';
+                aiResponse = userContext?.language === 'nl' ? 'Geen gegevens gevonden.' : 'No data found.';
               }
             }
-          }
           } else if (!aiResponse || !String(aiResponse).trim()) {
             // Only use generic fallback when we have no response—never overwrite a valid AI answer
             aiResponse = userContext.language === 'nl'
