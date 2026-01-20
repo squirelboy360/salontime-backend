@@ -64,6 +64,8 @@ HOW TO RESPOND:
 - **Fulfill the request**: Picture → <img>; address/maps → Google Maps link; services → cards with data-salon-id and data-service-id. Use your own judgment; you don’t need a rule for every case.
 - **Do NOT** reply with "How can I help you?" or re-listing the full salon list. Show only what they asked for.
 
+**POSITIVE AFFIRMATIONS** – When the user expresses satisfaction with a salon or option you just showed ("Perfect", "I love it", "I love this one", "Great", "I'll take it", "This one", "Sounds good", "Yes that one", "Love it", "I like it", "Mooi", "Prima", "Geweldig", etc.), do **NOT** reply with "How can I help you?" or any generic. Acknowledge their choice briefly and offer the natural next step, e.g. "Great choice! Would you like me to help you book an appointment there?" or "Glad you like it! Shall I help you book?" You have the context of which salon from the conversation; use it. Never use the generic in this case.
+
 **APPOINTMENTS & BOOKINGS – YOU HAVE NO BUILT-IN DATA** – You do not have the user's bookings, calendar, or schedule. For **any** question about their appointments ("do I have any today?", "what's on my schedule?", "any bookings?", "do I have an appointment tomorrow?"), you must **realize you need to fetch**: call make_api_request to GET /api/bookings with upcoming "true" (for today/upcoming) or "false" (for past), and limit as needed. Then answer from the API response. Do not guess or reply with a generic; fetch first, then respond.
 **BOOKING FOLLOW-UPS** – "What about yesterday?", "and tomorrow?", "other days?", "how about yesterday?" are follow-ups about bookings for another day. You need **fresh data** for that scope: call GET /api/bookings (upcoming="false" for yesterday/past, "true" for tomorrow/upcoming; for "other days" use upcoming="false" and limit=100 or both scopes). Then answer. Do NOT reply with "How can I help you?" or a generic.
 
@@ -1217,6 +1219,17 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
             }
           } catch (e) { /* leave aiResponse as is */ }
         }
+      }
+
+      // If the user gave a positive affirmation ("Perfect", "I love this one", etc.) about a salon we just discussed
+      // but the AI replied with the generic, replace with an acknowledgment and offer to book.
+      const userIsPositiveAffirmation = /\b(perfect|great|love|like|mooi|prima|geweldig|lekker|super|nice|sounds good|i'll take it|this one|that one|i want that one|yes that one|love it)\b/i.test(message);
+      const recentContextIsSalon = !!this._getSalonIdFromHistory(historyMessages);
+      if (isGenericHelp && userIsPositiveAffirmation && recentContextIsSalon) {
+        aiResponse = userContext?.language === 'nl'
+          ? 'Fijn dat je ervan houdt! Zal ik je helpen een afspraak te maken?'
+          : 'Glad you like it! Would you like to book an appointment there?';
+        console.log('🔄 Replaced generic after positive affirmation with acknowledgment + offer to book');
       }
 
       // If the user asked for ONE thing (picture, location, maps, services) but the AI returned the FULL salon list,
