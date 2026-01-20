@@ -820,8 +820,19 @@ class SalonController {
 
       // Redirect to web app after Stripe onboarding
       // The web app will automatically route salon owners to their dashboard
-      const returnUrl = `${process.env.FRONTEND_URL}`;
-      const refreshUrl = `${process.env.FRONTEND_URL}`;
+      const frontendUrl = process.env.FRONTEND_URL || 'https://www.salontime.nl';
+      
+      // Ensure URLs are valid and complete
+      const returnUrl = frontendUrl.startsWith('http') 
+        ? `${frontendUrl}/salon/onboarding/success`
+        : `https://${frontendUrl}/salon/onboarding/success`;
+      const refreshUrl = frontendUrl.startsWith('http')
+        ? `${frontendUrl}/salon/onboarding/retry`
+        : `https://${frontendUrl}/salon/onboarding/retry`;
+
+      if (!returnUrl || !refreshUrl || !returnUrl.match(/^https?:\/\//)) {
+        throw new AppError('Invalid FRONTEND_URL configuration. Must be a valid URL.', 500, 'INVALID_FRONTEND_URL');
+      }
 
       const accountLink = await stripeService.createAccountLink(
         salon.stripe_account_id,

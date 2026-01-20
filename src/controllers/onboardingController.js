@@ -160,8 +160,17 @@ class OnboardingController {
         stripeAccountRecord = stripeData;
 
         // 7. Generate onboarding link
-        const returnUrl = `${process.env.FRONTEND_URL}/salon/onboarding/success`;
-        const refreshUrl = `${process.env.FRONTEND_URL}/salon/onboarding/retry`;
+        const frontendUrl = process.env.FRONTEND_URL || 'https://www.salontime.nl';
+        const returnUrl = frontendUrl.startsWith('http') 
+          ? `${frontendUrl}/salon/onboarding/success`
+          : `https://${frontendUrl}/salon/onboarding/success`;
+        const refreshUrl = frontendUrl.startsWith('http')
+          ? `${frontendUrl}/salon/onboarding/retry`
+          : `https://${frontendUrl}/salon/onboarding/retry`;
+        
+        if (!returnUrl.match(/^https?:\/\//) || !refreshUrl.match(/^https?:\/\//)) {
+          throw new Error('Invalid FRONTEND_URL configuration');
+        }
         
         const accountLink = await stripeService.createAccountLink(
           stripeAccount.id,
@@ -311,8 +320,17 @@ class OnboardingController {
         nextAction = 'complete_stripe_onboarding';
         // Generate fresh onboarding link
         try {
-          const returnUrl = `${process.env.FRONTEND_URL}/salon/onboarding/success`;
-          const refreshUrl = `${process.env.FRONTEND_URL}/salon/onboarding/retry`;
+          const frontendUrl = process.env.FRONTEND_URL || 'https://www.salontime.nl';
+          const returnUrl = frontendUrl.startsWith('http') 
+            ? `${frontendUrl}/salon/onboarding/success`
+            : `https://${frontendUrl}/salon/onboarding/success`;
+          const refreshUrl = frontendUrl.startsWith('http')
+            ? `${frontendUrl}/salon/onboarding/retry`
+            : `https://${frontendUrl}/salon/onboarding/retry`;
+          
+          if (!returnUrl.match(/^https?:\/\//) || !refreshUrl.match(/^https?:\/\//)) {
+            throw new Error('Invalid FRONTEND_URL configuration');
+          }
           
           const accountLink = await stripeService.createAccountLink(
             salon.stripe_account_id,
