@@ -671,7 +671,10 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in 
         // Send function responses back to the model
         if (functionResponses.length > 0) {
           // Store the last function response data for HTML/UI generation
-          const lastResponseData = functionResponses[functionResponses.length - 1]?.functionResponse?.response?.data;
+          const lastFunctionResponse = functionResponses[functionResponses.length - 1];
+          const lastResponseData = lastFunctionResponse?.functionResponse?.response?.data;
+          // Store for later use in follow-up prompts
+          functionResponses._lastData = lastResponseData;
           
           result = await chat.sendMessage(functionResponses);
           response = result.response;
@@ -773,41 +776,113 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
       
       // If still no response after function calls, the model might need a follow-up
       // Also check if response is generic and needs context
-      if (!aiResponse || aiResponse.trim().length === 0 || 
-          (aiResponse.toLowerCase().includes('verwerkt') && !aiResponse.includes('<output>')) ||
-          (aiResponse.toLowerCase().includes('processed') && !aiResponse.includes('<output>'))) {
-        if (functionCallCount > 0) {
-          // Function calls completed but no text response - request a summary with HTML
-          try {
-            const messageLower = message.toLowerCase();
-            let followUpPrompt = '';
-            
-            if (messageLower.includes('booking') || messageLower.includes('boeking')) {
-              followUpPrompt = 'Je hebt de boekingen opgehaald. Geef nu een samenvatting in het Nederlands en toon ze in HTML in <output> tags met ai-card elementen voor elke booking. Gebruik de exacte data die je hebt ontvangen.';
-            } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
-              followUpPrompt = 'Je hebt de salons opgehaald. Geef nu een samenvatting in het Nederlands en toon ze in HTML in <output> tags met ai-card elementen voor elke salon. Gebruik de exacte data die je hebt ontvangen.';
+      const isGenericResponse = !aiResponse || aiResponse.trim().length === 0 || 
+          (aiResponse.toLowerCase().includes('verwerkt') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
+          (aiResponse.toLowerCase().includes('processed') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
+          (aiResponse.toLowerCase().includes('hoe kan ik') && !aiResponse.includes('<output>') && !aiResponse.includes('**')) ||
+          (aiResponse.toLowerCase().includes('how can i') && !aiResponse.includes('<output>') && !aiResponse.includes('**'));
+      
+      if (isGenericResponse && functionCallCount > 0) {
+        // Function calls completed but response is generic - force display of data
+        let responseData = null;
+        let dataArray = [];
+        
+        try {
+          // Get the actual data from function responses
+          const lastFunctionResponse = functionResponses[functionResponses.length - 1];
+          responseData = lastFunctionResponse?.functionResponse?.response?.data;
+          
+          // Handle different response structures
+          if (responseData && typeof responseData === 'object') {
+            if (responseData.success && responseData.data) {
+              responseData = responseData.data;
+            } else if (responseData.data && Array.isArray(responseData.data)) {
+              responseData = responseData.data;
+            } else if (responseData.bookings && Array.isArray(responseData.bookings)) {
+              responseData = responseData.bookings;
+            } else if (responseData.salons && Array.isArray(responseData.salons)) {
+              responseData = responseData.salons;
+            }
+          }
+          
+          dataArray = Array.isArray(responseData) ? responseData : [];
+          
+          const messageLower = message.toLowerCase();
+          let followUpPrompt = '';
+          
+          if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('vandaag')) {
+            if (dataArray.length > 0) {
+              // Filter for today's bookings if user asked about today
+              const today = new Date().toISOString().split('T')[0];
+              let filteredBookings = dataArray;
+              if (messageLower.includes('vandaag') || messageLower.includes('today') || messageLower.includes('gepland')) {
+                filteredBookings = dataArray.filter(b => {
+                  const bookingDate = b.appointment_date || b.appointmentDate || b.date;
+                  return bookingDate && bookingDate.startsWith(today);
+                });
+              }
+              
+              if (filteredBookings.length > 0) {
+                followUpPrompt = `De gebruiker vroeg naar boekingen. Je hebt ${filteredBookings.length} booking(s) gevonden voor vandaag. Toon ZEKER deze boekingen in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(filteredBookings.slice(0, 10))}. Maak ai-card elementen voor elke booking met data-booking-id. Begin met een korte samenvatting zoals "Je hebt ${filteredBookings.length} boeking(en) vandaag:" en toon dan de cards.`;
+              } else {
+                followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen voor vandaag. Zeg duidelijk in het Nederlands: "Je hebt geen boekingen vandaag."';
+              }
             } else {
-              followUpPrompt = 'Je hebt de data opgehaald. Geef nu een samenvatting en toon de data in HTML in <output> tags met geschikte styling. Gebruik de exacte data die je hebt ontvangen.';
+              followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen gevonden. Zeg dit duidelijk in het Nederlands: "Je hebt geen boekingen vandaag" of "Je hebt geen boekingen gevonden".';
             }
-            
-            const followUpResult = await chat.sendMessage(followUpPrompt);
-            const followUpResponse = followUpResult.response;
-            
-            if (typeof followUpResponse.text === 'function') {
-              aiResponse = followUpResponse.text();
-            } else if (followUpResponse.text) {
-              aiResponse = followUpResponse.text;
-            } else if (followUpResponse.candidates && followUpResponse.candidates[0] && followUpResponse.candidates[0].content) {
-              const parts = followUpResponse.candidates[0].content.parts || [];
-              aiResponse = parts.map(part => part.text || '').join('');
+          } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
+            if (dataArray.length > 0) {
+              followUpPrompt = `Je hebt ${dataArray.length} salon(s) opgehaald. Toon NU de salons in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(dataArray.slice(0, 10))}. Maak ai-card elementen voor elke salon met data-salon-id.`;
+            } else {
+              followUpPrompt = 'Je hebt de salons opgehaald maar er zijn geen salons gevonden. Zeg dit duidelijk in het Nederlands.';
             }
+          } else {
+            if (dataArray.length > 0) {
+              followUpPrompt = `Je hebt data opgehaald. Toon NU de data in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(dataArray.slice(0, 10))}.`;
+            } else {
+              followUpPrompt = 'Je hebt de data opgehaald maar er is niets gevonden. Zeg dit duidelijk in het Nederlands.';
+            }
+          }
+          
+          console.log('🔄 Sending follow-up prompt to force data display:', followUpPrompt.substring(0, 100));
+          
+          const followUpResult = await chat.sendMessage(followUpPrompt);
+          const followUpResponse = followUpResult.response;
+          
+          if (typeof followUpResponse.text === 'function') {
+            aiResponse = followUpResponse.text();
+          } else if (followUpResponse.text) {
+            aiResponse = followUpResponse.text;
+          } else if (followUpResponse.candidates && followUpResponse.candidates[0] && followUpResponse.candidates[0].content) {
+            const parts = followUpResponse.candidates[0].content.parts || [];
+            aiResponse = parts.map(part => part.text || '').join('');
+          }
+          
+          console.log('✅ Follow-up response received:', aiResponse.substring(0, 200));
           } catch (e) {
+            console.error('❌ Follow-up prompt failed:', e);
             // If follow-up fails, provide a helpful default message based on the request
             const messageLower = message.toLowerCase();
-            if (messageLower.includes('booking') || messageLower.includes('boeking')) {
-              aiResponse = 'Ik heb je boekingen opgehaald. Hier zijn ze:';
+            
+            if (dataArray.length > 0) {
+              // We have data but follow-up failed - create a simple HTML response
+              if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('vandaag')) {
+                aiResponse = '<output><p>Je hebt de volgende boekingen vandaag:</p><ul>' + 
+                  dataArray.slice(0, 5).map(b => {
+                    const salonName = b.salon_name || b.salonName || b.salon?.name || 'Salon';
+                    const time = b.start_time || b.startTime || b.appointment_time || '';
+                    return `<li><strong>${salonName}</strong> om ${time}</li>`;
+                  }).join('') + 
+                  '</ul></output>';
+              } else {
+                aiResponse = '<output><p>Hier is de opgehaalde informatie:</p></output>';
+              }
             } else {
-              aiResponse = 'Ik heb de informatie opgehaald. Hoe wil je dat ik het presenteer?';
+              if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('vandaag')) {
+                aiResponse = 'Je hebt geen boekingen vandaag.';
+              } else {
+                aiResponse = 'Ik heb de informatie opgehaald maar er is niets gevonden.';
+              }
             }
           }
         } else {
