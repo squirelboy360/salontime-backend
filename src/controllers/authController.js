@@ -446,6 +446,36 @@ class AuthController {
     }
   });
 
+  // Request password reset (forgot password)
+  forgotPassword = asyncHandler(async (req, res) => {
+    const { email } = req.body;
+
+    if (!email || typeof email !== 'string' || !email.trim()) {
+      throw new AppError('Email is required', 400, 'MISSING_EMAIL');
+    }
+
+    const emailTrimmed = email.toLowerCase().trim();
+    const redirectTo = process.env.PASSWORD_RESET_REDIRECT_URL || process.env.FRONTEND_URL;
+
+    try {
+      const options = redirectTo ? { redirectTo } : {};
+      const { error } = await supabase.auth.resetPasswordForEmail(emailTrimmed, options);
+
+      if (error) {
+        console.warn('Password reset request error:', error.message);
+        throw new AppError('Failed to send password reset email', 400, 'RESET_FAILED');
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'If an account exists with that email, you will receive password reset instructions shortly.'
+      });
+    } catch (e) {
+      if (e instanceof AppError) throw e;
+      throw new AppError('Failed to send password reset email', 500, 'RESET_FAILED');
+    }
+  });
+
   // Resend confirmation email
   resendConfirmation = asyncHandler(async (req, res) => {
     const { email } = req.body;

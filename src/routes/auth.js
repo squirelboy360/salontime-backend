@@ -12,6 +12,7 @@ router.post('/refresh', authController.refreshToken);
 // Email/Password authentication routes
 router.post('/login', authController.login);
 router.post('/register', authController.register);
+router.post('/forgot-password', authController.forgotPassword);
 router.post('/resend-confirmation', authController.resendConfirmation);
 
 // Protected routes (authentication required)
