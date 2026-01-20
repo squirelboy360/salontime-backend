@@ -167,8 +167,8 @@ ANALYTICS:
 Use make_api_request to fetch data, then show it in <output> with ai-card, data-booking-id or data-salon-id. When a list is empty, say so and suggest a next step (e.g. "Zoek een salon" or "Maak een afspraak"). Be warm and concise.
 
 CRITICAL – Match your text to what you show:
-- If you render <output> cards: do NOT say "You have no bookings" or "There are no X" without a scope—it contradicts the UI. Use e.g. "No bookings for today. Here’s your next upcoming:" then the cards. Do not repeat the card content (salon, service, date, time) in your text; the cards show it.
-- If the user asked for a narrow scope (e.g. today) and you have 0 for that but 1+ for another (e.g. upcoming): one short intro, then only <output> cards—no duplicate listing in prose.
+- If you render <output> cards: do NOT say "You have no bookings" or "There are no X" without a scope—it contradicts the UI. Do not repeat the card content (salon, service, date, time) in your text; the cards show it.
+- If the user asks for a specific scope (today, vandaag, yesterday) and you have 0 for that scope: say "No [bookings] for [that scope]" and suggest a next step. Do NOT show cards from other dates (do not show "next upcoming" when they asked for today and today is empty).
 - If you have nothing to show: say "No [bookings] for [today]" and do not render cards; suggest a next step.
 
 ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in English.'}`;
@@ -237,8 +237,19 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     const lang = userContext?.language === 'nl' ? 'nl' : 'en';
 
     if (isBooking) {
+      const wantToday = /vandaag|today/i.test(msg);
+      const todayStr = new Date().toISOString().split('T')[0];
+      const forToday = wantToday ? dataArray.filter(b => String(b.appointment_date || b.appointmentDate || '').startsWith(todayStr)) : dataArray;
+
+      if (wantToday && forToday.length === 0) {
+        return lang === 'nl'
+          ? 'Je hebt vandaag geen boekingen. Je kunt een salon zoeken of een afspraak maken.'
+          : 'You have no bookings for today. You can search for a salon or make an appointment.';
+      }
+
+      const toShow = (wantToday ? forToday : dataArray).slice(0, 20);
       const now = new Date();
-      const bookingCards = dataArray.slice(0, 20).map(booking => {
+      const bookingCards = toShow.map(booking => {
         const salonName = booking.salon?.business_name || booking.salons?.business_name || booking.salonName || 'Salon';
         const serviceName = booking.service?.name || booking.services?.name || booking.serviceName || 'Service';
         const date = booking.appointment_date || booking.appointmentDate || '';
@@ -253,7 +264,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
         return `<div class="ai-card" ${dataAttrs} style="padding: 16px; margin: 8px 0; border: 1px solid #e0e0e0; border-radius: 8px; cursor: pointer;"><h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600;">${salonName}${label}</h3><p style="margin: 4px 0; color: #666; font-size: 14px;">${serviceName}</p><p style="margin: 4px 0; color: #666; font-size: 14px;">📅 ${date} om ${time}</p></div>`;
       }).join('');
 
-      const heading = lang === 'nl' ? `Je hebt ${dataArray.length} boeking(en):` : `You have ${dataArray.length} booking(s):`;
+      const heading = lang === 'nl' ? `Je hebt ${toShow.length} boeking(en):` : `You have ${toShow.length} booking(s):`;
       return `<output><p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">${heading}</p>${bookingCards}</output>`;
     }
 
@@ -942,8 +953,18 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
             
             // Generate HTML cards for bookings
             if (messageLowerCheck.includes('booking') || messageLowerCheck.includes('boeking') || messageLowerCheck.includes('gepland') || messageLowerCheck.includes('afspraak')) {
+              const wantToday = /vandaag|today/i.test(messageLowerCheck);
+              const todayStr = new Date().toISOString().split('T')[0];
+              const forToday = wantToday ? dataArray.filter(b => String(b.appointment_date || b.appointmentDate || '').startsWith(todayStr)) : dataArray;
+
+              if (wantToday && forToday.length === 0) {
+                aiResponse = userContext?.language === 'nl'
+                  ? 'Je hebt vandaag geen boekingen. Je kunt een salon zoeken of een afspraak maken.'
+                  : 'You have no bookings for today. You can search for a salon or make an appointment.';
+              } else {
+              const toShow = (wantToday ? forToday : dataArray).slice(0, 10);
               const now = new Date();
-              const bookingCards = dataArray.slice(0, 10).map(booking => {
+              const bookingCards = toShow.map(booking => {
                 const salonName = booking.salon?.business_name || booking.salons?.business_name || booking.salon_name || 'Salon';
                 const serviceName = booking.service?.name || booking.services?.name || booking.service_name || 'Service';
                 const date = booking.appointment_date || booking.appointmentDate || '';
@@ -965,18 +986,19 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
                 `;
               }).join('');
               
-              const upcomingCount = dataArray.filter(b => {
+              const upcomingCount = toShow.filter(b => {
                 const d = b.appointment_date || b.appointmentDate, t = b.start_time || b.startTime;
                 if (!d || !t) return false;
                 const dt = new Date(d + 'T' + (t.length >= 5 ? t.slice(0, 5) : t) + ':00');
                 return dt >= now && (b.status || '') !== 'cancelled';
               }).length;
-              const sub = upcomingCount < dataArray.length ? ` (${upcomingCount} komend)` : '';
-              const heading = userContext?.language === 'nl' ? `Je hebt ${dataArray.length} boeking(en)${sub}:` : `You have ${dataArray.length} booking(s)${sub}:`;
+              const sub = upcomingCount < toShow.length ? ` (${upcomingCount} komend)` : '';
+              const heading = userContext?.language === 'nl' ? `Je hebt ${toShow.length} boeking(en)${sub}:` : `You have ${toShow.length} booking(s)${sub}:`;
               aiResponse = `<output>
                 <p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">${heading}</p>
                 ${bookingCards}
               </output>`;
+              }
             } else {
               // Generic data display: salons, favorites, services/categories, or any list
               const isFav = /favoriet|favorite|opgeslagen/i.test(messageLowerCheck);
@@ -1141,23 +1163,19 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
               
               if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('vandaag')) {
                 if (dataArray.length > 0) {
-                  // Filter for today's bookings if user asked about today
                   const today = new Date().toISOString().split('T')[0];
-                  let filteredBookings = dataArray;
-                  if (messageLower.includes('vandaag') || messageLower.includes('today') || messageLower.includes('gepland')) {
-                    filteredBookings = dataArray.filter(b => {
-                      const bookingDate = b.appointment_date || b.appointmentDate || b.date;
-                      return bookingDate && bookingDate.startsWith(today);
-                    });
-                  }
-                  
+                  const wantToday = /vandaag|today/i.test(messageLower);
+                  const filteredBookings = wantToday ? dataArray.filter(b => (String(b.appointment_date || b.appointmentDate || b.date || '')).startsWith(today)) : dataArray;
+
                   if (filteredBookings.length > 0) {
                     followUpPrompt = `De gebruiker vroeg naar boekingen. Je hebt ${filteredBookings.length} booking(s) gevonden voor vandaag. Toon ZEKER deze boekingen in HTML in <output> tags. Gebruik deze exacte data: ${JSON.stringify(filteredBookings.slice(0, 10))}. Maak ai-card elementen voor elke booking met data-booking-id. Begin met een korte samenvatting zoals "Je hebt ${filteredBookings.length} boeking(en) vandaag:" en toon dan de cards.`;
+                  } else if (wantToday) {
+                    followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen voor vandaag. Zeg ALLEEN: "Je hebt vandaag geen boekingen. Je kunt een salon zoeken of een afspraak maken." Toon GEEN <output> cards en GEEN andere (aanstaande) boekingen.';
                   } else {
-                    followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen voor vandaag. Zeg duidelijk in het Nederlands: "Je hebt geen boekingen vandaag."';
+                    followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen gevonden. Zeg dit duidelijk in het Nederlands.';
                   }
                 } else {
-                  followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen gevonden. Zeg dit duidelijk in het Nederlands: "Je hebt geen boekingen vandaag" of "Je hebt geen boekingen gevonden".';
+                  followUpPrompt = 'Je hebt de boekingen opgehaald maar er zijn geen boekingen gevonden. Zeg dit duidelijk in het Nederlands.';
                 }
               } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
                 if (dataArray.length > 0) {
@@ -1194,21 +1212,29 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
             const messageLower = message.toLowerCase();
             
             if (dataArray.length > 0) {
-              // We have data but follow-up failed - create a simple HTML response
+              const wantToday = /vandaag|today/i.test(messageLower);
+              const todayStr = new Date().toISOString().split('T')[0];
+              const forToday = wantToday ? dataArray.filter(b => String(b.appointment_date || b.appointmentDate || b.date || '').startsWith(todayStr)) : dataArray;
+
               if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('vandaag')) {
-                aiResponse = '<output><p>Je hebt de volgende boekingen vandaag:</p><ul>' + 
-                  dataArray.slice(0, 5).map(b => {
-                    const salonName = b.salon_name || b.salonName || b.salon?.name || 'Salon';
-                    const time = b.start_time || b.startTime || b.appointment_time || '';
-                    return `<li><strong>${salonName}</strong> om ${time}</li>`;
-                  }).join('') + 
-                  '</ul></output>';
+                if (wantToday && forToday.length === 0) {
+                  aiResponse = 'Je hebt vandaag geen boekingen. Je kunt een salon zoeken of een afspraak maken.';
+                } else {
+                  const toShow = (wantToday ? forToday : dataArray).slice(0, 5);
+                  aiResponse = '<output><p>Je hebt de volgende boekingen vandaag:</p><ul>' + 
+                    toShow.map(b => {
+                      const salonName = b.salon_name || b.salonName || b.salon?.name || 'Salon';
+                      const time = b.start_time || b.startTime || b.appointment_time || '';
+                      return `<li><strong>${salonName}</strong> om ${time}</li>`;
+                    }).join('') + 
+                    '</ul></output>';
+                }
               } else {
                 aiResponse = '<output><p>Hier is de opgehaalde informatie:</p></output>';
               }
             } else {
               if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('vandaag')) {
-                aiResponse = 'Je hebt geen boekingen vandaag.';
+                aiResponse = 'Je hebt vandaag geen boekingen. Je kunt een salon zoeken of een afspraak maken.';
               } else {
                 aiResponse = 'Ik heb de informatie opgehaald maar er is niets gevonden.';
               }
