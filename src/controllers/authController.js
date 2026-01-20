@@ -455,9 +455,18 @@ class AuthController {
     }
 
     const emailTrimmed = email.toLowerCase().trim();
-    // Use a proper deep link so the app can show "Set new password". Must be a full URL.
+    // Prefer a WEB URL so Supabase sends tokens in the hash. Our /auth/reset-password page reads
+    // the hash and redirects to salontime://auth/reset-password?access_token=...&refresh_token=...
+    // Query params reach the app on iOS; the raw hash does not.
     let redirectTo = process.env.PASSWORD_RESET_REDIRECT_URL || null;
-    if (!redirectTo || !String(redirectTo).includes('://')) {
+    if (redirectTo && String(redirectTo).includes('://')) {
+      // use as-is
+    } else if (process.env.API_URL) {
+      const base = String(process.env.API_URL).replace(/\/$/, '');
+      redirectTo = base.startsWith('http') ? base + '/auth/reset-password' : 'https://' + base + '/auth/reset-password';
+    } else if (process.env.VERCEL_URL) {
+      redirectTo = 'https://' + String(process.env.VERCEL_URL).replace(/^https?:\/\//, '') + '/auth/reset-password';
+    } else {
       redirectTo = 'salontime://auth/reset-password';
     }
 

@@ -98,6 +98,47 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Password reset redirect page: Supabase sends user here with #access_token=...&refresh_token=...
+// JavaScript reads the hash and redirects to salontime://auth/reset-password?access_token=...&refresh_token=...
+// Query params are passed to the app reliably (unlike the hash on iOS). Set PASSWORD_RESET_REDIRECT_URL to this route's URL.
+app.get('/auth/reset-password', (req, res) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reset password - SalonTime</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; text-align: center; }
+    .msg { color: #666; margin: 16px 0; }
+    .err { color: #c00; }
+    a { color: #0066cc; }
+  </style>
+</head>
+<body>
+  <div id="out"><p class="msg">Opening SalonTime…</p></div>
+  <script>
+    (function() {
+      var hash = (window.location.hash || '').replace(/^#/, '');
+      var params = {};
+      hash.split('&').forEach(function(p) {
+        var i = p.indexOf('=');
+        if (i > 0) params[decodeURIComponent(p.slice(0,i))] = decodeURIComponent((p.slice(i+1) || ''));
+      });
+      var at = params.access_token;
+      var rt = params.refresh_token;
+      if (at && rt) {
+        var q = 'access_token=' + encodeURIComponent(at) + '&refresh_token=' + encodeURIComponent(rt);
+        window.location.href = 'salontime://auth/reset-password?' + q;
+        return;
+      }
+      document.getElementById('out').innerHTML = '<p class="err">Invalid or expired link.</p><p class="msg">Open the SalonTime app and request a new password reset from the login screen.</p>';
+    })();
+  </script>
+</body>
+</html>`);
+});
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
