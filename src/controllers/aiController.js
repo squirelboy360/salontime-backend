@@ -52,12 +52,13 @@ HOW TO RESPOND:
 - Do NOT call make_api_request. Just respond warmly.
 - Examples: "Hallo! Leuk je te spreken. Waar kan ik je mee helpen? Je kunt me vragen over je boekingen, een salon zoeken, of een afspraak maken." or "Hi! Hoe kan ik je vandaag helpen?"
 
-**DATA QUERIES** – Use your judgment. Infer from the full message:
+**DATA QUERIES** – Use your judgment and the conversation. Infer from the full message and from what you just showed or discussed:
 - What they want: bookings, salons, favorites, services, reviews, etc.
-- Time/scope: past, upcoming, today, yesterday, all, everything, last week, etc.
+- Time/scope: past, upcoming, today, yesterday, all, everything, other days, last week, etc.
 - Amount: all / everything / alle → use limit (e.g. 500) when the API supports it; a few / some → default limits are fine.
 - Filters: date, location, status, search query—map to the endpoint’s query params.
-Then call make_api_request with the right endpoint and queryParams. Supported params: /api/bookings → upcoming ("true"|"false"), limit, page. For past/afgelopen/yesterday/other days/all/alle use upcoming "false" and limit 500 so the user sees all their past bookings. For yesterday, filter the returned list to yesterday's date before showing. /api/salons/search → q, lat, lng, sort; /api/salons/nearby → latitude, longitude; /api/favorites, /api/services/categories → no extra params. After you get data, ALWAYS render as HTML <output> (ai-card, data-booking-id or data-salon-id) or Markdown. NEVER output raw JSON.
+- **FOLLOW-UPS** (e.g. "Which is the closest?", "What about other days?", "the first one", "tell me more about X"): answer from the data you already have in this conversation. Do NOT respond with "How can I help you? You can ask about your bookings...". Use the last list/cards you showed, or call make_api_request only if you need fresh data.
+Then call make_api_request when you need data. Params: /api/bookings → upcoming ("true"|"false"), limit, page; for past/yesterday/other days/all use upcoming "false" and limit 500. For yesterday, filter the returned list to yesterday's date before showing. /api/salons/search, /api/salons/nearby → lat, lng, sort; /api/favorites, /api/services/categories. After you get data, render as HTML <output> (ai-card, data-booking-id or data-salon-id) or Markdown. NEVER output raw JSON.
 
 **OTHER QUESTIONS** (how-to, general info, opening hours, etc.):
 - Answer helpfully and specifically. Never say "Ik heb je verzoek verwerkt" – give a real answer or offer to look up data.
@@ -99,7 +100,7 @@ REVIEWS:
 - GET /api/reviews/my-reviews - Get current user's reviews
 - POST /api/reviews - Create a review
 
-For data questions (bookings, salons, etc.): call make_api_request first, then show the data. For greetings or non-data questions: answer directly. Never use "Ik heb je verzoek verwerkt" or "Hoe kan ik je verder helpen" as your main response.
+For data: call make_api_request when you need fresh data, then show it. For follow-ups that refer to what you just showed ("which is the closest?", "what about other days?", "the first one"), answer from that conversation context—do not reply with a generic "How can I help you? You can ask about your bookings...". When the user clearly asks for something, fulfill it. For greetings: answer directly. Never use "Ik heb je verzoek verwerkt" or "Hoe kan ik je verder helpen" as your main response.
 
 After fetching data, decide how to display it:
 
@@ -380,7 +381,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
         functionDeclarations: [
           {
             name: 'make_api_request',
-            description: `Fetch data to answer the user. Read their full message and infer: what they want (bookings, salons, favorites, services, etc.), time/scope (past, upcoming, today, all, everything), and amount (all/everything → use limit e.g. 500 where the API supports it). Pick the right endpoint and set queryParams to match. /api/bookings: upcoming "true"|"false", limit, page. /api/salons/nearby: latitude, longitude. /api/salons/search: q, lat, lng, sort. /api/favorites, /api/services/categories: no extra params. Never return raw JSON—always render as HTML <output> or Markdown. Location: ${locationInfo}.`,
+            description: `Fetch data when the user needs it. For follow-ups about what you just showed ("which is the closest?", "what about other days?", "the first one"), answer from the conversation—only call this when you need new data. Otherwise: infer what they want (bookings, salons, favorites, etc.), time/scope (past, upcoming, today, yesterday, other days, all), amount (all→limit 500). /api/bookings: upcoming "true"|"false", limit, page. /api/salons/nearby: latitude, longitude. /api/salons/search: q, lat, lng, sort. /api/favorites, /api/services/categories. Render as HTML <output> or Markdown, never raw JSON. Location: ${locationInfo}.`,
             parameters: {
               type: 'OBJECT',
               properties: {
@@ -817,20 +818,14 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
         for (const functionCall of currentFunctionCalls) {
           if (functionCall.name === 'make_api_request') {
             try {
-              let { method, endpoint, body, queryParams } = functionCall.args;
-              queryParams = { ...(queryParams || {}) };
-              // For past bookings, request more so users with many past bookings see them
-              if (String(endpoint || '').includes('/api/bookings') && (queryParams.upcoming === 'false' || queryParams.upcoming === false)) {
-                const L = parseInt(queryParams.limit, 10);
-                if (!L || L < 100) queryParams.limit = '500';
-              }
+              const { method, endpoint, body, queryParams } = functionCall.args;
               const apiResponse = await this.makeApiRequest(
                 userId,
                 userToken,
                 method,
                 endpoint,
                 body,
-                queryParams
+                queryParams || {}
               );
 
               functionResponses.push({
@@ -1278,8 +1273,8 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
               }
             }
           }
-          } else {
-            // No function calls, generic or empty - use a helpful default instead of "verwerkt"
+          } else if (!aiResponse || !String(aiResponse).trim()) {
+            // Only use generic fallback when we have no response—never overwrite a valid AI answer
             aiResponse = userContext.language === 'nl'
               ? 'Waar kan ik je mee helpen? Je kunt me bijvoorbeeld vragen over je boekingen, een salon zoeken, of een afspraak maken.'
               : 'How can I help you? You can ask about your bookings, search for a salon, or make an appointment.';
