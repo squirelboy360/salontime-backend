@@ -58,11 +58,11 @@ HOW TO RESPOND:
 - **You MUST call make_api_request.** Use /api/salons/search with sort=rating (and latitude, longitude from User Context), or /api/salons/popular. For "efficient" or "location" also pass latitude & longitude. Never say "I can't search" or "I can't find"—use these endpoints. Never offer unrelated alternatives (e.g. "most visited") instead of calling.
 - **Always return salon results as HTML <output> with ai-card and data-salon-id** so the user can tap to open and book. Do not reply with only "How can I help you?" or a generic—call the API and show cards.
 
-**ONE SPECIFIC THING ABOUT ONE ITEM** – When the user asks for **anything about one salon or booking** you just showed (e.g. picture, address, hours, "open in maps", "navigate to", "what does it look like"):
+**ONE SPECIFIC THING ABOUT ONE ITEM** – When the user asks for **anything about one salon or booking** you just showed (e.g. picture, address, hours, "open in maps", "their services", "show me their services", "what do they offer"):
 - **Resolve which one**: The item you recommended or they’re referring to. Use data-salon-id or data-booking-id from the card you showed, or /api/salons/search?q=name.
-- **Fetch if needed**: GET /api/salons/{salonId} returns full details (images, address, business_hours, etc.). Use it when you need more than you have.
-- **Fulfill the request**: Use the data to do what they asked—picture, address, a link to open in maps, hours, whatever. Use your own judgment; you don’t need a rule for every case.
-- **Do NOT** reply by re-listing the full salon or booking list. Show only what they asked for.
+- **Fetch if needed**: GET /api/salons/{salonId} (images, address, business_hours). GET /api/salons/{salonId}/services for "their services", "what do they offer". Use the data to fulfill the request.
+- **Fulfill the request**: Picture → <img>; address/maps → Google Maps link; services → cards with data-salon-id and data-service-id. Use your own judgment; you don’t need a rule for every case.
+- **Do NOT** reply with "How can I help you?" or re-listing the full salon list. Show only what they asked for.
 
 **DATA QUERIES** – Understand intent in any wording or language (like ChatGPT). Infer: what they want (bookings, salons, favorites, services), time/scope (past, upcoming, a date, "other times", "all"), amount ("all" → limit 500). Call make_api_request when you need data. **FOLLOW-UPS** ("Which is the closest?", "what about other days?"): answer from data you already showed; only call when you need fresh data. After you get data, **use HTML <output> with ai-card (data-salon-id or data-booking-id) for any list the user can act on** (tap to view, book, cancel)—it makes the task fast. NEVER output raw JSON.
 
@@ -116,7 +116,7 @@ After fetching data, decide how to display it:
    - data-booking-id="..." for booking navigation
    - class="ai-image" for images
    - Use proper HTML structure for lists, cards, and interactive elements
-2. **When they ask for one specific thing about one item** (picture, address, "open in maps", etc.): show only that. Do not re-output the full list.
+2. **When they ask for one specific thing about one item** (picture, address, "open in maps", services, etc.): show only that. Do not re-output the full list.
 3. **For simple informational responses or formatted text**: Use Markdown format:
    - Use **bold** for emphasis
    - Use - or * for lists
@@ -257,19 +257,37 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     return null;
   }
 
-  // When the user asked for one thing about one salon (picture, location, maps) but the AI failed:
-  // fetch that salon and return HTML (image or maps link). historyMessages from conversation.
+  // When the user asked for one thing about one salon (picture, location, maps, services) but the AI failed:
+  // fetch and return HTML. historyMessages from conversation.
   async _oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken) {
     const salonId = this._getSalonIdFromHistory(historyMessages);
     if (!salonId) return null;
+    const lang = userContext?.language === 'nl';
+    const isImage = /\b(picture|image|photo)\b|where is the picture/i.test(message);
+    const isServices = /\bservices\b|their services|what services|show me their services|what do they offer/i.test(message);
+
+    if (isServices) {
+      try {
+        const res = await this.makeApiRequest(userId, userToken, 'GET', `/api/salons/${salonId}/services`, null, {});
+        const list = res?.data?.data || res?.data || [];
+        if (!Array.isArray(list)) return null;
+        const cards = list.slice(0, 20).map(s => {
+          const name = s.name || 'Service';
+          const price = s.price != null ? ` · €${Number(s.price)}` : '';
+          const dur = s.duration != null ? ` · ${s.duration} min` : '';
+          return `<div class="ai-card" data-salon-id="${salonId}" data-service-id="${s.id || ''}" style="padding:12px;margin:8px 0;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;">${name}${price}${dur}</div>`;
+        }).join('');
+        const head = lang ? 'Diensten:' : 'Services:';
+        return `<output><p style="margin-bottom:12px;font-weight:600;">${head}</p>${cards || (lang ? 'Geen diensten gevonden.' : 'No services found.')}</output>`;
+      } catch (e) { return null; }
+    }
+
     let res;
     try {
       res = await this.makeApiRequest(userId, userToken, 'GET', `/api/salons/${salonId}`, null, {});
     } catch (e) { return null; }
     const salon = res?.data?.data || res?.data;
     if (!salon) return null;
-    const lang = userContext?.language === 'nl';
-    const isImage = /\b(picture|image|photo)\b|where is the picture/i.test(message);
     if (isImage) {
       const url = Array.isArray(salon.images) && salon.images[0] ? salon.images[0] : (typeof salon.images === 'string' ? salon.images : null);
       if (url) {
@@ -360,7 +378,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
             name: 'make_api_request',
             description: `Fetch data when you need it. Understand intent in any wording or language.
 When the user wants to book or find a salon ("best", "top rated", "popular", "recommend"): call /api/salons/search with sort=rating and latitude/longitude (from Location), or /api/salons/popular. Do NOT say "I can't"—these exist. Always render salon and booking lists as HTML <output> with ai-card and data-salon-id or data-booking-id so the user can tap and act fast.
-When the user asks for **one specific thing about one salon or booking** you showed (picture, address, "open in maps", hours, etc.): resolve it (data-salon-id or /api/salons/search?q=name), call GET /api/salons/{id} if you need more data, use the data to fulfill the request, and do NOT re-list everything.
+When the user asks for **one specific thing about one salon** you showed (picture, address, "open in maps", "their services", "show me their services"): resolve data-salon-id from the card, call GET /api/salons/{id} or GET /api/salons/{id}/services, fulfill the request, and do NOT re-list or reply with "How can I help you?"
 Other: /api/bookings, /api/salons/nearby, /api/salons/search, /api/salons/{salonId} (full details: images, address, etc.), /api/favorites, /api/services/categories. For follow-ups, answer from context; only call when you need new data. Never raw JSON. Location: ${locationInfo}.`,
             parameters: {
               type: 'OBJECT',
@@ -1030,7 +1048,7 @@ Other: /api/bookings, /api/salons/nearby, /api/salons/search, /api/salons/{salon
             }
           } else if (!aiResponse || !String(aiResponse).trim()) {
             // If they asked for one thing about one salon (picture, location, maps), try that first
-            if (/\b(picture|image|photo|location|address|maps|map|navigate)\b|where is the picture|show me in maps|in a map/i.test(message)) {
+            if (/\b(picture|image|photo|location|address|maps|map|navigate|services)\b|where is the picture|show me in maps|in a map|their services|what services|show me their services|what do they offer/i.test(message)) {
               try {
                 const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
                 if (html) aiResponse = html;
@@ -1103,19 +1121,19 @@ Other: /api/bookings, /api/salons/nearby, /api/salons/search, /api/salons/{salon
 
       // If the model replied with the generic "How can I help you?" / "Waar kan ik je mee helpen?" but the user
       // clearly asked for salons (best, recommend, book at best salon, etc.), fetch and show cards instead.
-      // BUT: if they asked for ONE thing about ONE salon (picture, location, maps), show that—not the full list.
+      // BUT: if they asked for ONE thing about ONE salon (picture, location, maps, services), show that—not the full list.
       const isGenericHelp = aiResponse && !/<output>/.test(aiResponse) && (
         (/How can I help you\?/i.test(aiResponse) && /bookings|salon|appointment/i.test(aiResponse)) ||
         (/Waar kan ik je mee helpen\?/i.test(aiResponse) && /boekingen|salon|afspraak/i.test(aiResponse))
       );
       const userWantsSalons = /\b(best|top|rated|recommend|popular|efficient|salon)\b/i.test(message) ||
         (/\bbook\b/i.test(message) && /\b(appointment|salon)\b/i.test(message));
-      const isOneSpecificThing = /\b(picture|image|photo|location|address|maps|map|navigate)\b|where is the picture|show me in maps|in a map/i.test(message);
-      if (isGenericHelp && userWantsSalons) {
+      const isOneSpecificThing = /\b(picture|image|photo|location|address|maps|map|navigate|services)\b|where is the picture|show me in maps|in a map|their services|what services|show me their services|what do they offer/i.test(message);
+      if (isGenericHelp && (userWantsSalons || isOneSpecificThing)) {
         if (isOneSpecificThing) {
           try {
             const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
-            if (html) { aiResponse = html; console.log('🔄 Replaced generic with one-salon detail (picture/maps)'); }
+            if (html) { aiResponse = html; console.log('🔄 Replaced generic with one-salon detail (picture/maps/services)'); }
           } catch (e) { /* leave generic */ }
         } else {
           try {
@@ -1138,14 +1156,15 @@ Other: /api/bookings, /api/salons/nearby, /api/salons/search, /api/salons/{salon
         }
       }
 
-      // If the user asked for ONE thing (picture, location, maps) but the AI returned the FULL salon list or
-      // text without an image, replace with the one-salon detail (image or maps link).
+      // If the user asked for ONE thing (picture, location, maps, services) but the AI returned the FULL salon list,
+      // text without an image, or generic without a service list, replace with the one-salon detail.
       const looksLikeFullList = (aiResponse && ((aiResponse.match(/data-salon-id/g) || []).length > 1) || /Top salons to book|Gevonden resultaten|to book:/i.test(aiResponse));
       const askedPictureButNoImg = /\b(picture|image|photo)\b|where is the picture/i.test(message) && aiResponse && !/<img|class="ai-image"/.test(aiResponse);
-      if (isOneSpecificThing && (looksLikeFullList || askedPictureButNoImg)) {
+      const askedForServicesButNoServiceContent = /\bservices\b|their services|what services|show me their services|what do they offer/i.test(message) && aiResponse && !/service|€|EUR|duration|min|ai-card|data-service/i.test(aiResponse);
+      if (isOneSpecificThing && (looksLikeFullList || askedPictureButNoImg || askedForServicesButNoServiceContent)) {
         try {
           const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
-          if (html) { aiResponse = html; console.log('🔄 Replaced full list / text with one-salon detail (picture/maps)'); }
+          if (html) { aiResponse = html; console.log('🔄 Replaced full list / text with one-salon detail (picture/maps/services)'); }
         } catch (e) { /* leave as is */ }
       }
 
