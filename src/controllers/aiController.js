@@ -1317,6 +1317,13 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
         // If parsing fails, continue without GenUI (legacy support)
       }
 
+      // Ensure we never save or send an empty response (e.g. after genui strip removed everything)
+      if (!aiResponse || !String(aiResponse).trim()) {
+        aiResponse = userContext?.language === 'nl'
+          ? 'Waar kan ik je mee helpen? Je kunt me bijvoorbeeld vragen over je boekingen, een salon zoeken, of een afspraak maken.'
+          : 'How can I help you? You can ask about your bookings, search for a salon, or make an appointment.';
+      }
+
       // Save AI response
       const { data: aiMessage, error: aiMsgError } = await authenticatedClient
         .from('ai_messages')
@@ -1342,12 +1349,17 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
         .eq('id', currentConversationId);
 
       const safeContent = (userContext?.language === 'nl' ? 'Er ging iets mis. Probeer het opnieuw.' : 'Something went wrong. Please try again.');
-      const content = (aiMessage && aiMessage.content) || (aiResponse && String(aiResponse).trim()) || safeContent;
+      const finalContent = String((aiMessage && aiMessage.content) || aiResponse || '').trim() || safeContent;
       res.json({
         success: true,
         conversationId: currentConversationId,
         userMessage: userMessage,
-        aiMessage: (aiMessage && aiMessage.content) ? aiMessage : { id: null, role: 'assistant', content, created_at: new Date().toISOString() }
+        aiMessage: {
+          id: (aiMessage && aiMessage.id) || null,
+          role: 'assistant',
+          content: finalContent,
+          created_at: (aiMessage && aiMessage.created_at) || new Date().toISOString()
+        }
       });
     } catch (error) {
       // Check if model is initialized
