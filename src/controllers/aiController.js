@@ -1315,16 +1315,13 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
         .update({ updated_at: new Date().toISOString() })
         .eq('id', currentConversationId);
 
+      const safeContent = (userContext?.language === 'nl' ? 'Er ging iets mis. Probeer het opnieuw.' : 'Something went wrong. Please try again.');
+      const content = (aiMessage && aiMessage.content) || (aiResponse && String(aiResponse).trim()) || safeContent;
       res.json({
         success: true,
         conversationId: currentConversationId,
         userMessage: userMessage,
-        aiMessage: aiMessage || {
-          id: null,
-          role: 'assistant',
-          content: aiResponse,
-          created_at: new Date().toISOString()
-        }
+        aiMessage: (aiMessage && aiMessage.content) ? aiMessage : { id: null, role: 'assistant', content, created_at: new Date().toISOString() }
       });
     } catch (error) {
       // Check if model is initialized
