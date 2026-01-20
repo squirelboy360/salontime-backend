@@ -921,7 +921,6 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
           // No function calls but still empty - provide a default response
           aiResponse = 'Ik heb je verzoek verwerkt. Hoe kan ik je verder helpen?';
         }
-      }
 
       // Check if response contains GenUI/A2UI commands (legacy support - not actively used)
       // The AI might include GenUI commands in its response, but we primarily use HTML now
