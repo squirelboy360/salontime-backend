@@ -193,10 +193,13 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     if (messageLower.includes('dienst') || messageLower.includes('service') || messageLower.includes('categorie')) {
       return { endpoint: '/api/services/categories', queryParams: {} };
     }
-    // Bookings: upcoming or past
+    // Bookings: upcoming or past; use higher limit for "all"
     if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('afspraak')) {
       const wantPast = /past|afgelopen|verleden|earlier|vroeger/i.test(messageLower);
-      return { endpoint: '/api/bookings', queryParams: { upcoming: wantPast ? 'false' : 'true' } };
+      const wantAll = /all|alle|everything|al mijn|all my|show me all|toon al|toon alle|every/i.test(messageLower);
+      const queryParams = { upcoming: wantPast ? 'false' : 'true' };
+      if (wantAll) queryParams.limit = '500';
+      return { endpoint: '/api/bookings', queryParams };
     }
     // Generic "show me" / "toon": default to upcoming bookings
     return { endpoint: '/api/bookings', queryParams: { upcoming: 'true' } };
@@ -782,14 +785,20 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
           if (functionCall.name === 'make_api_request') {
             try {
               const { method, endpoint, body, queryParams } = functionCall.args;
-              
+              let q = { ...(queryParams || {}) };
+              // Override /api/bookings params when the AI sends wrong ones
+              if (endpoint && String(endpoint).includes('/api/bookings')) {
+                const m = (message || '').toLowerCase();
+                if (/past|afgelopen|verleden|earlier|vroeger/i.test(m)) q.upcoming = 'false';
+                if (/all|alle|everything|al mijn|all my|show me all|toon al|toon alle|every/i.test(m)) q.limit = '500';
+              }
               const apiResponse = await this.makeApiRequest(
                 userId,
                 userToken,
                 method,
                 endpoint,
                 body,
-                queryParams || {}
+                q
               );
 
               functionResponses.push({
