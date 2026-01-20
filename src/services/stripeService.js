@@ -251,23 +251,47 @@ class StripeService {
     let event;
 
     console.log('Webhook signature:', sig);
-    console.log('Webhook secret:', process.env.STRIPE_WEBHOOK_SECRET ? 'Set' : 'Not set');
     console.log('Body type:', typeof req.body);
     console.log('Body length:', req.body ? req.body.length : 'No body');
 
-    try {
-      event = this.stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-      console.log('Webhook event type:', event.type);
-    } catch (err) {
-      console.error('Webhook signature verification failed:', err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
+    // Try both webhook secrets (snapshot and thin payloads)
+    const webhookSecrets = [
+      process.env.STRIPE_WEBHOOK_SECRET, // Snapshot payload secret
+      process.env.STRIPE_WEBHOOK_SECRET_THIN, // Thin payload secret (for v2 events)
+    ].filter(Boolean); // Remove undefined values
+
+    if (webhookSecrets.length === 0) {
+      console.error('No webhook secrets configured');
+      return res.status(400).send('Webhook secret not configured');
+    }
+
+    let lastError;
+    for (const secret of webhookSecrets) {
+      try {
+        event = this.stripe.webhooks.constructEvent(req.body, sig, secret);
+        console.log('Webhook event type:', event.type, 'verified with secret');
+        break; // Successfully verified
+      } catch (err) {
+        lastError = err;
+        continue; // Try next secret
+      }
+    }
+
+    if (!event) {
+      console.error('Webhook signature verification failed with all secrets:', lastError?.message);
+      return res.status(400).send(`Webhook Error: ${lastError?.message || 'Signature verification failed'}`);
     }
 
     try {
       switch (event.type) {
         case 'account.updated':
         case 'connect.account.updated':
-          await this.handleAccountUpdated(event.data.object);
+        case 'v2.core.account.updated': // Stripe Connect v2 event (thin payload)
+          // v2 events have different structure - extract account from nested structure
+          const account = event.type.startsWith('v2.') 
+            ? event.data.object 
+            : event.data.object;
+          await this.handleAccountUpdated(account);
           break;
         case 'payment_intent.succeeded':
           await this.handlePaymentSucceeded(event.data.object);
@@ -363,6 +387,13 @@ class StripeService {
     const { supabase } = require('../config/database');
     
     try {
+      // Find payment record to get booking_id
+      const { data: payment } = await supabase
+        .from('payments')
+        .select('booking_id')
+        .eq('stripe_payment_intent_id', paymentIntent.id)
+        .single();
+
       const { error } = await supabase
         .from('payments')
         .update({
@@ -374,6 +405,19 @@ class StripeService {
 
       if (error) {
         console.error('Failed to update payment status:', error);
+      } else if (payment && payment.booking_id) {
+        // Also update booking payment_status
+        const { error: bookingError } = await supabase
+          .from('bookings')
+          .update({
+            payment_status: 'paid',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', payment.booking_id);
+        
+        if (bookingError) {
+          console.error('Failed to update booking payment status:', bookingError);
+        }
       }
     } catch (error) {
       console.error('Error handling payment success webhook:', error);
@@ -385,6 +429,13 @@ class StripeService {
     const { supabase } = require('../config/database');
     
     try {
+      // Find payment record to get booking_id
+      const { data: payment } = await supabase
+        .from('payments')
+        .select('booking_id')
+        .eq('stripe_payment_intent_id', paymentIntent.id)
+        .single();
+
       const { error } = await supabase
         .from('payments')
         .update({
@@ -395,6 +446,19 @@ class StripeService {
 
       if (error) {
         console.error('Failed to update payment status:', error);
+      } else if (payment && payment.booking_id) {
+        // Also update booking payment_status
+        const { error: bookingError } = await supabase
+          .from('bookings')
+          .update({
+            payment_status: 'pending', // Reset to pending on failure
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', payment.booking_id);
+        
+        if (bookingError) {
+          console.error('Failed to update booking payment status:', bookingError);
+        }
       }
     } catch (error) {
       console.error('Error handling payment failure webhook:', error);

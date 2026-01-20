@@ -4,7 +4,7 @@ const config = require('./index');
 // Initialize Stripe (will be null if no secret key)
 const stripe = config.stripe.secret_key 
   ? new Stripe(config.stripe.secret_key, {
-      apiVersion: '2023-10-16',
+      apiVersion: '2025-12-15.clover', // Updated to match Stripe dashboard
     })
   : null;
 

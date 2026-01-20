@@ -556,6 +556,23 @@ class PaymentController {
         console.error('Failed to update payment status:', error);
         } else {
           console.log(`✅ Payment succeeded and updated: ${paymentIntent.id}`);
+          
+          // Also update booking payment_status if payment is linked to a booking
+          if (existingPayment.booking_id) {
+            const { error: bookingError } = await supabase
+              .from('bookings')
+              .update({
+                payment_status: 'paid',
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', existingPayment.booking_id);
+            
+            if (bookingError) {
+              console.error('Failed to update booking payment status:', bookingError);
+            } else {
+              console.log(`✅ Updated booking ${existingPayment.booking_id} payment_status to 'paid'`);
+            }
+          }
         }
       } else {
         console.warn(`⚠️ Payment succeeded but no booking found to link: ${paymentIntent.id}`);
@@ -568,6 +585,14 @@ class PaymentController {
   // Handle failed payment webhook
   async handlePaymentFailure(paymentIntent) {
     try {
+      // Find payment record
+      const { data: payment } = await supabase
+        .from('payments')
+        .select('booking_id')
+        .eq('stripe_payment_intent_id', paymentIntent.id)
+        .single();
+
+      // Update payment status
       const { error } = await supabase
         .from('payments')
         .update({ 
@@ -578,6 +603,23 @@ class PaymentController {
 
       if (error) {
         console.error('Failed to update payment status:', error);
+      }
+
+      // Also update booking payment_status if payment is linked to a booking
+      if (payment && payment.booking_id) {
+        const { error: bookingError } = await supabase
+          .from('bookings')
+          .update({
+            payment_status: 'pending', // Reset to pending on failure
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', payment.booking_id);
+        
+        if (bookingError) {
+          console.error('Failed to update booking payment status:', bookingError);
+        } else {
+          console.log(`✅ Updated booking ${payment.booking_id} payment_status to 'pending'`);
+        }
       }
 
       console.log(`Payment failed: ${paymentIntent.id}`);
