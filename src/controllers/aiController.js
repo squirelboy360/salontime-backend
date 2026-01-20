@@ -44,9 +44,20 @@ class AIController {
 
     return `You are an intelligent, proactive AI assistant for SalonTime, a salon booking platform. Think and act like a helpful human assistant would - be proactive, understand context, and take action to help users.
 
-CRITICAL RULE #1: When a user asks for ANY data (bookings, salons, favorites, etc.), you MUST use the make_api_request function FIRST before responding. NEVER say "no bookings", "I can help", "Ik heb je verzoek verwerkt", or any generic acknowledgment without first fetching the actual data. This is not optional - it's mandatory.
+CRITICAL RULE #1: When a user asks for data (bookings, salons, favorites, etc.), you MUST use the make_api_request function to fetch the data FIRST. However, you should be intelligent about what data to fetch based on the user's question:
+- If they ask about "today's bookings" or "vandaag", fetch bookings and filter for today's date in your response
+- If they ask about "my bookings", fetch all their bookings
+- If they ask for recommendations or "where should I go", fetch nearby salons based on their location
+- Understand the context and intent of the question - don't just fetch everything
 
-CRITICAL RULE #2: After fetching data using make_api_request, you MUST ALWAYS generate HTML/CSS to display that data visually. NEVER respond with just text like "Ik heb je verzoek verwerkt" after fetching data. You MUST wrap the data in <output> tags with HTML cards using the ai-card class. This is mandatory - no exceptions.
+CRITICAL RULE #2: After fetching data, you MUST:
+- Analyze the data intelligently based on what the user asked
+- Filter/process the data if needed (e.g., filter for today's date, filter by rating, etc.)
+- Generate HTML/CSS to display the RELEVANT data visually
+- Wrap the data in <output> tags with HTML cards using the ai-card class
+- Provide a natural, contextual response that answers their specific question
+
+NEVER respond with generic text like "Ik heb je verzoek verwerkt" or "I can help" - always provide actual, relevant information based on the data you fetched.
 
 Your personality:
 - Proactive: When users ask questions, you IMMEDIATELY fetch the information they need using make_api_request - you don't wait, you don't ask, you just do it
@@ -771,86 +782,34 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
       let functionCallCount = 0;
       const maxFunctionCallIterations = 5; // Prevent infinite loops
       
-      // Safety check: If AI didn't make a function call but the response suggests it should have,
-      // force a function call as a fallback. This ensures reliability without hardcoding keywords.
-      if ((!currentFunctionCalls || currentFunctionCalls.length === 0)) {
-        const responseText = (response.text && typeof response.text === 'function') ? response.text() : (response.text || '');
-        const responseLower = responseText.toLowerCase();
-        const messageLower = message.toLowerCase();
-        
-        // Check if response suggests data should have been fetched but wasn't
-        const seemsLikeDataRequest = 
-          responseLower.includes("don't have") ||
-          responseLower.includes("no bookings") ||
-          responseLower.includes("no salons") ||
-          responseLower.includes("couldn't find") ||
-          responseLower.includes("i can help") ||
-          responseLower.includes("how can i help") ||
-          responseLower.includes("would you like me to search") ||
-          responseLower.includes("i don't have access") ||
-          (responseLower.includes("verwerkt") && !responseLower.includes("genui")) || // Dutch "processed" without GenUI
-          (responseLower.includes("processed") && !responseLower.includes("genui"));
-        
-        // Check if user message suggests they want data - be more aggressive
-        // Include recommendation/advice requests, hair-related queries, etc.
-        const userWantsData = 
-          messageLower.includes('show') ||
-          messageLower.includes('toon') ||
-          messageLower.includes('list') ||
-          messageLower.includes('get') ||
-          messageLower.includes('find') ||
-          messageLower.includes('zoek') ||
-          messageLower.includes('my') ||
-          messageLower.includes('mijn') ||
-          messageLower.includes('all') ||
-          messageLower.includes('alle') ||
-          messageLower.includes('booking') ||
-          messageLower.includes('boeking') ||
-          messageLower.includes('appointment') ||
-          messageLower.includes('afspraak') ||
-          messageLower.includes('salon') ||
-          messageLower.includes('kapper') ||
-          messageLower.includes('hair') ||
-          messageLower.includes('haar') ||
-          messageLower.includes('hairdresser') ||
-          messageLower.includes('advies') ||
-          messageLower.includes('advice') ||
-          messageLower.includes('recommend') ||
-          messageLower.includes('aanbevel') ||
-          messageLower.includes('best') ||
-          messageLower.includes('beste') ||
-          messageLower.includes('where') ||
-          messageLower.includes('waar') ||
-          messageLower.includes('heen') ||
-          messageLower.includes('go') ||
-          messageLower.includes('gaan') ||
-          messageLower.includes('favorit') ||
-          messageLower.includes('favorite');
-        
-        // If response suggests data should have been fetched OR user explicitly wants data, force function call
-        // Be more aggressive - if user wants data, always fetch it
-        if (userWantsData || seemsLikeDataRequest) {
-          console.log(`⚠️ AI didn't make function call but should have - forcing fallback`);
+        // Minimal safety check: Only force function call if AI gives a generic response without data
+        // Let the AI be intelligent and decide when to fetch data naturally
+        if ((!currentFunctionCalls || currentFunctionCalls.length === 0)) {
+          const responseText = (response.text && typeof response.text === 'function') ? response.text() : (response.text || '');
+          const responseLower = responseText.toLowerCase();
           
-          // Determine which endpoint to call based on message content
-          if (messageLower.includes('booking') || messageLower.includes('boeking') || 
-              messageLower.includes('appointment') || messageLower.includes('afspraak')) {
-            currentFunctionCalls = [{
-              name: 'make_api_request',
-              args: {
-                method: 'GET',
-                endpoint: '/api/bookings'
-              }
-            }];
-            console.log(`🔍 Forcing bookings fetch as fallback`);
-          } else if (messageLower.includes('salon') || messageLower.includes('kapper') || 
-                     messageLower.includes('hair') || messageLower.includes('haar') ||
-                     messageLower.includes('hairdresser') || messageLower.includes('advies') ||
-                     messageLower.includes('advice') || messageLower.includes('recommend') ||
-                     messageLower.includes('aanbevel') || messageLower.includes('best') ||
-                     messageLower.includes('beste') || messageLower.includes('where') ||
-                     messageLower.includes('waar')) {
-            if (latitude && longitude) {
+          // Only force if AI gives a generic "I can help" response without actually helping
+          const seemsLikeGenericResponse = 
+            (responseLower.includes("verwerkt") && !responseLower.includes("genui") && !responseLower.includes("<output>")) ||
+            (responseLower.includes("processed") && !responseLower.includes("genui") && !responseLower.includes("<output>")) ||
+            (responseLower.includes("i can help") && !responseLower.includes("genui") && !responseLower.includes("<output>")) ||
+            (responseLower.includes("how can i help") && !responseLower.includes("genui") && !responseLower.includes("<output>"));
+          
+          // Only force as last resort if AI gives generic response
+          if (seemsLikeGenericResponse) {
+            console.log(`⚠️ AI gave generic response - minimal fallback`);
+            const messageLower = message.toLowerCase();
+            
+            // Only force for very clear data requests
+            if (messageLower.includes('booking') || messageLower.includes('boeking')) {
+              currentFunctionCalls = [{
+                name: 'make_api_request',
+                args: {
+                  method: 'GET',
+                  endpoint: '/api/bookings'
+                }
+              }];
+            } else if ((messageLower.includes('salon') || messageLower.includes('kapper') || messageLower.includes('advies') || messageLower.includes('recommend')) && latitude && longitude) {
               currentFunctionCalls = [{
                 name: 'make_api_request',
                 args: {
@@ -863,32 +822,9 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
                   }
                 }
               }];
-              console.log(`🔍 Forcing salon search as fallback with location`);
-            } else {
-              currentFunctionCalls = [{
-                name: 'make_api_request',
-                args: {
-                  method: 'GET',
-                  endpoint: '/api/salons/search',
-                  queryParams: {
-                    sort: 'rating'
-                  }
-                }
-              }];
-              console.log(`🔍 Forcing salon search as fallback without location`);
             }
-          } else if (messageLower.includes('favorit') || messageLower.includes('favorite') || messageLower.includes('favourite') || messageLower.includes('favourites')) {
-            currentFunctionCalls = [{
-              name: 'make_api_request',
-              args: {
-                method: 'GET',
-                endpoint: '/api/favorites'
-              }
-            }];
-            console.log(`🔍 Forcing favorites fetch as fallback`);
           }
         }
-      }
       
       while (currentFunctionCalls && currentFunctionCalls.length > 0 && functionCallCount < maxFunctionCallIterations) {
         functionCallCount++;
@@ -974,17 +910,27 @@ Remember: You're an intelligent assistant. When someone asks you something, you 
               const safeArray = Array.isArray(dataArray) ? dataArray : [];
               const limitedData = safeArray.slice(0, 5);
               
+              // Let the AI intelligently filter and process the data based on the original question
+              const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+              const isTodayQuery = messageLower.includes('vandaag') || messageLower.includes('today') || messageLower.includes('today\'s') || messageLower.includes('gepland');
+              
               if (messageLower.includes('booking') || messageLower.includes('boeking')) {
-                const bookingCount = safeArray.length;
-                htmlPrompt = `Je hebt ${bookingCount} boekingen opgehaald. Gebruik deze EXACTE data om HTML te genereren. Maak HTML cards met class="ai-card" en data-booking-id voor elke booking. Gebruik de volgende data: ${JSON.stringify(limitedData)}. Wrap alles in <output> tags. Genereer de HTML NU direct in je antwoord - geen tekst, alleen HTML in <output> tags.`;
+                if (isTodayQuery) {
+                  // Filter for today's bookings
+                  const todayBookings = safeArray.filter(booking => {
+                    const bookingDate = booking.appointment_date || booking.date || booking.appointmentDate;
+                    return bookingDate && bookingDate.startsWith(today);
+                  });
+                  htmlPrompt = `De gebruiker vroeg: "${message}". Je hebt alle boekingen opgehaald, maar de gebruiker wil ALLEEN boekingen voor VANDAAG (${today}). Filter de data en toon ALLEEN boekingen waar appointment_date begint met "${today}". Maak HTML cards met class="ai-card" en data-booking-id. Gebruik deze GEFILTERDE data: ${JSON.stringify(todayBookings.slice(0, 10))}. Wrap in <output> tags. Geef een natuurlijk antwoord zoals "Je hebt X boekingen vandaag" en toon ALLEEN vandaag's boekingen, NIET alle boekingen.`;
+                } else {
+                  htmlPrompt = `De gebruiker vroeg: "${message}". Je hebt boekingen opgehaald. Analyseer de vraag en toon alleen de relevante boekingen. Maak HTML cards met class="ai-card" en data-booking-id. Gebruik deze data: ${JSON.stringify(limitedData)}. Wrap in <output> tags. Geef een natuurlijk, contextueel antwoord dat de vraag beantwoordt.`;
+                }
               } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
-                const salonCount = safeArray.length;
-                htmlPrompt = `Je hebt ${salonCount} salons opgehaald. Gebruik deze EXACTE data om HTML te genereren. Maak HTML cards met class="ai-card" en data-salon-id voor elke salon. Gebruik de volgende data: ${JSON.stringify(limitedData)}. Wrap alles in <output> tags. Genereer de HTML NU direct - geen tekst, alleen HTML in <output> tags.`;
+                htmlPrompt = `De gebruiker vroeg: "${message}". Je hebt salons opgehaald. Analyseer de vraag en toon alleen de relevante salons. Maak HTML cards met class="ai-card" en data-salon-id. Gebruik deze data: ${JSON.stringify(limitedData)}. Wrap in <output> tags. Geef een natuurlijk, contextueel antwoord dat de vraag beantwoordt.`;
               } else if (messageLower.includes('favorit') || messageLower.includes('favorite')) {
-                const favoriteCount = safeArray.length;
-                htmlPrompt = `Je hebt ${favoriteCount} favorieten opgehaald. Gebruik deze EXACTE data om HTML te genereren. Maak HTML cards met class="ai-card" en data-salon-id voor elke favoriet. Gebruik de volgende data: ${JSON.stringify(limitedData)}. Wrap alles in <output> tags. Genereer de HTML NU direct - geen tekst, alleen HTML in <output> tags.`;
+                htmlPrompt = `De gebruiker vroeg: "${message}". Je hebt favorieten opgehaald. Maak HTML cards met class="ai-card" en data-salon-id. Gebruik deze data: ${JSON.stringify(limitedData)}. Wrap in <output> tags. Geef een natuurlijk antwoord.`;
               } else {
-                htmlPrompt = `Je hebt data opgehaald. Gebruik deze EXACTE data om HTML te genereren met class="ai-card". Wrap alles in <output> tags. Genereer de HTML NU direct - geen tekst, alleen HTML in <output> tags.`;
+                htmlPrompt = `De gebruiker vroeg: "${message}". Je hebt data opgehaald. Analyseer de vraag en toon alleen relevante data. Maak HTML cards met class="ai-card". Gebruik deze data: ${JSON.stringify(limitedData)}. Wrap in <output> tags. Geef een natuurlijk, contextueel antwoord dat de vraag beantwoordt.`;
               }
               
               const htmlResult = await chat.sendMessage(htmlPrompt);

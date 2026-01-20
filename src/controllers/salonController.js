@@ -623,7 +623,7 @@ class SalonController {
       // Add coordinates if missing (geocoding)
       let salonsWithCoords = salons || [];
       try {
-        const { geocodeSalons } = require('../utils/geocoding');
+      const { geocodeSalons } = require('../utils/geocoding');
         salonsWithCoords = geocodeSalons(salons || []);
       } catch (geocodeError) {
         console.warn('⚠️ Geocoding error (non-fatal):', geocodeError.message);
