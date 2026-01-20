@@ -65,6 +65,7 @@ HOW TO RESPOND:
 - **Do NOT** reply with "How can I help you?" or re-listing the full salon list. Show only what they asked for.
 
 **APPOINTMENTS & BOOKINGS – YOU HAVE NO BUILT-IN DATA** – You do not have the user's bookings, calendar, or schedule. For **any** question about their appointments ("do I have any today?", "what's on my schedule?", "any bookings?", "do I have an appointment tomorrow?"), you must **realize you need to fetch**: call make_api_request to GET /api/bookings with upcoming "true" (for today/upcoming) or "false" (for past), and limit as needed. Then answer from the API response. Do not guess or reply with a generic; fetch first, then respond.
+**BOOKING FOLLOW-UPS** – "What about yesterday?", "and tomorrow?", "other days?", "how about yesterday?" are follow-ups about bookings for another day. You need **fresh data** for that scope: call GET /api/bookings (upcoming="false" for yesterday/past, "true" for tomorrow/upcoming; for "other days" use upcoming="false" and limit=100 or both scopes). Then answer. Do NOT reply with "How can I help you?" or a generic.
 
 **DATA QUERIES** – Understand intent in any wording or language (like ChatGPT). Infer: what they want (bookings, salons, favorites, services), time/scope (past, upcoming, a date, "other times", "all"), amount ("all" → limit 500). When you need data you don't have, call make_api_request. **FOLLOW-UPS** ("Which is the closest?", "what about other days?"): answer from data you already showed; only call when you need fresh data. After you get data, **use HTML <output> with ai-card (data-salon-id or data-booking-id) for any list the user can act on** (tap to view, book, cancel)—it makes the task fast. NEVER output raw JSON.
 
@@ -424,7 +425,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
         functionDeclarations: [
           {
             name: 'make_api_request',
-            description: `You have NO built-in knowledge of the user's bookings or calendar. For any question about their appointments, schedule, or "do I have X today"—realize you need data, call GET /api/bookings (upcoming "true"|"false", limit), then answer from the response. Do not reply without fetching.
+            description: `You have NO built-in knowledge of the user's bookings or calendar. For any question about their appointments, schedule, or "do I have X today"—realize you need data, call GET /api/bookings (upcoming "true"|"false", limit), then answer from the response. For follow-ups like "what about yesterday?", "and tomorrow?", "other days?"—same: you need fresh data for that day/scope; call GET /api/bookings (upcoming=false for yesterday/past, true for tomorrow), then answer. Do not reply with a generic.
 When the user wants to book or find a salon ("best", "top rated", "popular", "recommend"): call /api/salons/search with sort=rating and latitude/longitude (from Location), or /api/salons/popular. Do NOT say "I can't"—these exist. Always render salon and booking lists as HTML <output> with ai-card and data-salon-id or data-booking-id so the user can tap and act fast.
 When the user asks for **one specific thing about one salon** you showed (picture, address, "open in maps", "their services"): resolve data-salon-id from the card, call GET /api/salons/{id} or GET /api/salons/{id}/services, fulfill the request, and do NOT re-list or reply with "How can I help you?"
 Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, /api/salons/{salonId}, /api/favorites, /api/services/categories. For follow-ups, answer from context; only call when you need new data. Never raw JSON. Location: ${locationInfo}.`,
@@ -1102,8 +1103,8 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
                 if (html) aiResponse = html;
               } catch (e) {}
             }
-            // If they asked about appointments/bookings (today, etc.), fetch and show
-            if (!aiResponse && /\b(appointment|booking|bookings|plans|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b|do I have|any (plans|appointment)|(my|any) (bookings|appointments)/i.test(message)) {
+            // If they asked about appointments/bookings (today, yesterday, "what about tomorrow", etc.), fetch and show
+            if (!aiResponse && /\b(appointment|booking|bookings|plans|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b|do I have|any (plans|appointment)|(my|any) (bookings|appointments)|what about (yesterday|tomorrow|other days)|how about (yesterday|tomorrow|other days)|\bother days\b/i.test(message)) {
               try {
                 const html = await this._bookingsFallback(message, userContext, userId, userToken);
                 if (html) aiResponse = html;
@@ -1183,7 +1184,7 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
       );
       const userWantsSalons = /\b(best|top|rated|recommend|popular|efficient|salon)\b/i.test(message) ||
         (/\bbook\b/i.test(message) && /\b(appointment|salon)\b/i.test(message));
-      const userWantsBookings = /\b(appointment|booking|bookings|plans|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b|do I have|any (plans|appointment)|(my|any) (bookings|appointments)/i.test(message);
+      const userWantsBookings = /\b(appointment|booking|bookings|plans|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b|do I have|any (plans|appointment)|(my|any) (bookings|appointments)|what about (yesterday|tomorrow|other days)|how about (yesterday|tomorrow|other days)|\bother days\b/i.test(message);
       const isOneSpecificThing = /\b(picture|image|photo|location|address|maps|map|navigate|services)\b|where is the picture|show me in maps|in a map|their services|what services|show me their services|what do they offer/i.test(message);
       if (isGenericHelp && (userWantsSalons || isOneSpecificThing || userWantsBookings)) {
         if (isOneSpecificThing) {
@@ -1294,6 +1295,15 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
         aiResponse = userContext?.language === 'nl'
           ? 'Waar kan ik je mee helpen? Je kunt me bijvoorbeeld vragen over je boekingen, een salon zoeken, of een afspraak maken.'
           : 'How can I help you? You can ask about your bookings, search for a salon, or make an appointment.';
+      }
+
+      // Last-chance: if they asked about bookings (today, yesterday, "how about yesterday", etc.) and we still
+      // don't have booking content or a clear "no", run _bookingsFallback (catches any missed path)
+      if (userWantsBookings && aiResponse && !/data-booking-id|no (appointment|booking)|geen (afspraak|boeking)/i.test(aiResponse)) {
+        try {
+          const html = await this._bookingsFallback(message, userContext, userId, userToken);
+          if (html) { aiResponse = html; console.log('🔄 Last-chance: replaced with bookings'); }
+        } catch (e) { /* leave as is */ }
       }
 
       // Save AI response
