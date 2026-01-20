@@ -1,4 +1,4 @@
-const { supabase } = require('../config/database');
+const { supabase, supabaseAdmin } = require('../config/database');
 const supabaseService = require('../services/supabaseService');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const { transporter, isEmailEnabled, fromEmail } = require('../config/email');
@@ -135,6 +135,10 @@ class AuthController {
         }
       }
 
+      // One account: include has_salon. Use requested user_type (OAuth allows both views).
+      const { data: owned } = await supabaseAdmin.from('salons').select('id').eq('owner_id', user.id).limit(1);
+      const has_salon = !!(owned && owned.length > 0);
+
       // Return user data and tokens
       res.status(200).json({
         success: true,
@@ -142,7 +146,8 @@ class AuthController {
           user: {
             id: user.id,
             email: user.email,
-            user_type: userProfile.user_type,
+            user_type: user_type,
+            has_salon: has_salon,
             first_name: userProfile.first_name,
             last_name: userProfile.last_name,
             avatar_url: userProfile.avatar_url,
@@ -206,6 +211,8 @@ class AuthController {
       console.log('🔍 req.user.id type:', typeof req.user.id);
       
       const userProfile = await supabaseService.getUserProfile(req.user.id);
+      const { data: owned } = await supabaseAdmin.from('salons').select('id').eq('owner_id', req.user.id).limit(1);
+      const has_salon = !!(owned && owned.length > 0);
 
       res.status(200).json({
         success: true,
@@ -214,6 +221,7 @@ class AuthController {
             id: userProfile.id,
             email: req.user.email,
             user_type: userProfile.user_type,
+            has_salon: has_salon,
             first_name: userProfile.first_name,
             last_name: userProfile.last_name,
             phone: userProfile.phone,
@@ -292,10 +300,10 @@ class AuthController {
       // Get user profile
       const userProfile = await supabaseService.getUserProfile(authData.user.id);
 
-      // Enforce role separation - user_type in request must match profile user_type
-      if (userProfile.user_type !== user_type) {
-        throw new AppError(`Access denied. You are registered as a ${userProfile.user_type}, not a ${user_type}.`, 403, 'ROLE_MISMATCH');
-      }
+      // One account: client and salon_owner are the same. Allow both views for everyone.
+      // has_salon lets the app show "My Salon" / onboarding when they choose salon_owner.
+      const { data: owned } = await supabaseAdmin.from('salons').select('id').eq('owner_id', authData.user.id).limit(1);
+      const has_salon = !!(owned && owned.length > 0);
 
       res.status(200).json({
         success: true,
@@ -303,7 +311,8 @@ class AuthController {
           user: {
             id: authData.user.id,
             email: authData.user.email,
-            user_type: userProfile.user_type,
+            user_type: user_type,
+            has_salon: has_salon,
             first_name: userProfile.first_name,
             last_name: userProfile.last_name,
             avatar_url: userProfile.avatar_url,
