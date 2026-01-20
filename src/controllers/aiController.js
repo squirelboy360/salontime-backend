@@ -305,6 +305,52 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     return `<output><p><strong>${salon.business_name || 'Salon'}</strong></p><p>${addr}</p>${link}</output>`;
   }
 
+  // When the user asked about their appointments/bookings (today, tomorrow, etc.) but the AI failed.
+  async _bookingsFallback(message, userContext, userId, userToken) {
+    const m = message.toLowerCase();
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const tomorrowStr = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+    const yesterdayStr = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+    const isToday = /\btoday\b|vandaag|today\'s|\btonight\b/i.test(m);
+    const isTomorrow = /\btomorrow\b|morgen/i.test(m);
+    const isYesterday = /\byesterday\b|gisteren/i.test(m);
+    const upcoming = isYesterday ? 'false' : 'true';
+    try {
+      const res = await this.makeApiRequest(userId, userToken, 'GET', '/api/bookings', null, { upcoming, limit: '100' });
+      const raw = res?.data?.data?.bookings || res?.data?.bookings || [];
+      let list = Array.isArray(raw) ? raw : [];
+      if (isToday) list = list.filter(b => (b.appointment_date || b.appointmentDate || '') === todayStr);
+      else if (isTomorrow) list = list.filter(b => (b.appointment_date || b.appointmentDate || '') === tomorrowStr);
+      else if (isYesterday) list = list.filter(b => (b.appointment_date || b.appointmentDate || '') === yesterdayStr);
+      const lang = userContext?.language === 'nl';
+      if (list.length === 0) {
+        const msg = isToday ? (lang ? 'Je hebt vandaag geen afspraken.' : 'You have no appointments today.')
+          : isTomorrow ? (lang ? 'Je hebt morgen geen afspraken.' : 'You have no appointments tomorrow.')
+          : isYesterday ? (lang ? 'Je had gisteren geen afspraken.' : 'You had no appointments yesterday.')
+          : (lang ? 'Je hebt geen aanstaande afspraken.' : 'You have no upcoming appointments.');
+        return `<output><p>${msg}</p></output>`;
+      }
+      const now = new Date();
+      const sep = lang ? ' om ' : ' at ';
+      const cards = list.slice(0, 50).map(b => {
+        const salonName = b.salons?.business_name || b.salon?.business_name || b.salonName || 'Salon';
+        const serviceName = b.services?.name || b.service?.name || b.serviceName || 'Service';
+        const date = b.appointment_date || b.appointmentDate || '';
+        const time = (b.start_time || b.startTime || '').toString().slice(0, 5);
+        const bookingId = b.id || '';
+        const status = b.status || '';
+        const dt = date && time ? new Date(date + 'T' + time + ':00') : null;
+        const isUpcoming = dt ? dt >= now : false;
+        const isCancelled = status === 'cancelled';
+        const dataAttrs = `data-booking-id="${bookingId}" data-booking-status="${status}" data-is-upcoming="${isUpcoming}" data-is-cancelled="${isCancelled}"`;
+        const label = isCancelled ? (lang ? ' (Geannuleerd)' : ' (Cancelled)') : (isUpcoming ? '' : (lang ? ' (Afgelopen)' : ' (Past)'));
+        return `<div class="ai-card" ${dataAttrs} style="padding:16px;margin:8px 0;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;"><h3 style="margin:0 0 8px 0;font-size:16px;font-weight:600;">${salonName}${label}</h3><p style="margin:4px 0;color:#666;font-size:14px;">${serviceName}</p><p style="margin:4px 0;color:#666;font-size:14px;">${date}${sep}${time}</p></div>`;
+      }).join('');
+      const head = lang ? `Je hebt ${list.length} afspraak/afspraken:` : `You have ${list.length} appointment(s):`;
+      return `<output><p style="margin-bottom:16px;font-size:16px;font-weight:600;">${head}</p>${cards}</output>`;
+    } catch (e) { return null; }
+  }
+
   // Make authenticated API request on behalf of user
   async makeApiRequest(userId, userToken, method, endpoint, body = null, queryParams = {}) {
     try {
@@ -1047,10 +1093,17 @@ Other: /api/bookings, /api/salons/nearby, /api/salons/search, /api/salons/{salon
               }
             }
           } else if (!aiResponse || !String(aiResponse).trim()) {
-            // If they asked for one thing about one salon (picture, location, maps), try that first
+            // If they asked for one thing about one salon (picture, location, maps, services), try that first
             if (/\b(picture|image|photo|location|address|maps|map|navigate|services)\b|where is the picture|show me in maps|in a map|their services|what services|show me their services|what do they offer/i.test(message)) {
               try {
                 const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
+                if (html) aiResponse = html;
+              } catch (e) {}
+            }
+            // If they asked about appointments/bookings (today, etc.), fetch and show
+            if (!aiResponse && /\b(appointment|booking|bookings|plans|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b|do I have|any (plans|appointment)|(my|any) (bookings|appointments)/i.test(message)) {
+              try {
+                const html = await this._bookingsFallback(message, userContext, userId, userToken);
                 if (html) aiResponse = html;
               } catch (e) {}
             }
@@ -1128,12 +1181,18 @@ Other: /api/bookings, /api/salons/nearby, /api/salons/search, /api/salons/{salon
       );
       const userWantsSalons = /\b(best|top|rated|recommend|popular|efficient|salon)\b/i.test(message) ||
         (/\bbook\b/i.test(message) && /\b(appointment|salon)\b/i.test(message));
+      const userWantsBookings = /\b(appointment|booking|bookings|plans|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b|do I have|any (plans|appointment)|(my|any) (bookings|appointments)/i.test(message);
       const isOneSpecificThing = /\b(picture|image|photo|location|address|maps|map|navigate|services)\b|where is the picture|show me in maps|in a map|their services|what services|show me their services|what do they offer/i.test(message);
-      if (isGenericHelp && (userWantsSalons || isOneSpecificThing)) {
+      if (isGenericHelp && (userWantsSalons || isOneSpecificThing || userWantsBookings)) {
         if (isOneSpecificThing) {
           try {
             const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
             if (html) { aiResponse = html; console.log('🔄 Replaced generic with one-salon detail (picture/maps/services)'); }
+          } catch (e) { /* leave generic */ }
+        } else if (userWantsBookings) {
+          try {
+            const html = await this._bookingsFallback(message, userContext, userId, userToken);
+            if (html) { aiResponse = html; console.log('🔄 Replaced generic with bookings'); }
           } catch (e) { /* leave generic */ }
         } else {
           try {
@@ -1165,6 +1224,15 @@ Other: /api/bookings, /api/salons/nearby, /api/salons/search, /api/salons/{salon
         try {
           const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
           if (html) { aiResponse = html; console.log('🔄 Replaced full list / text with one-salon detail (picture/maps/services)'); }
+        } catch (e) { /* leave as is */ }
+      }
+
+      // If the user asked about appointments/bookings but the AI didn't return booking cards or a clear "no" message, fetch and show
+      const askedForBookingsButNoBookingContent = userWantsBookings && aiResponse && !/data-booking-id|no (appointment|booking)|geen (afspraak|boeking)/i.test(aiResponse);
+      if (askedForBookingsButNoBookingContent) {
+        try {
+          const html = await this._bookingsFallback(message, userContext, userId, userToken);
+          if (html) { aiResponse = html; console.log('🔄 Replaced non-booking response with bookings'); }
         } catch (e) { /* leave as is */ }
       }
 
