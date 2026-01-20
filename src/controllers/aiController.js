@@ -58,11 +58,11 @@ HOW TO RESPOND:
 - **You MUST call make_api_request.** Use /api/salons/search with sort=rating (and latitude, longitude from User Context), or /api/salons/popular. For "efficient" or "location" also pass latitude & longitude. Never say "I can't search" or "I can't find"—use these endpoints. Never offer unrelated alternatives (e.g. "most visited") instead of calling.
 - **Always return salon results as HTML <output> with ai-card and data-salon-id** so the user can tap to open and book. Do not reply with only "How can I help you?" or a generic—call the API and show cards.
 
-**PICTURE / IMAGE / DETAILS OF A SPECIFIC SALON** – When the user asks for a **picture, image, photo**, or other detail about "the salon", "that one", "the one you chose", or a salon by name (e.g. "Show me a picture of the salon", "what does it look like", "show me Beauty Bar Rotterdam 680"):
-- **Resolve which salon**: Use the salon you just recommended or last discussed. The id is in the data-salon-id of the card you showed in the conversation, or call GET /api/salons/search?q={salon name} to find it.
-- **Fetch full details**: Call GET /api/salons/{salonId}. The response includes \`images\` (array of URLs), \`business_name\`, \`address\`, \`business_hours\`, etc.
-- **For picture/image/photo**: Put the image in <output> with <img class="ai-image" src="{images[0]}" alt="{business_name}" style="max-width:100%;border-radius:8px;" />. If there are more images, you may show 2–3. Add a short caption. **Do NOT re-output the full salon list**—show only what they asked for (the image for that salon).
-- **For address, hours, or other details**: Format and show in <output> or markdown. Do not re-list all salons.
+**ONE SPECIFIC THING ABOUT ONE ITEM** – When the user asks for **anything about one salon or booking** you just showed (e.g. picture, address, hours, "open in maps", "navigate to", "what does it look like"):
+- **Resolve which one**: The item you recommended or they’re referring to. Use data-salon-id or data-booking-id from the card you showed, or /api/salons/search?q=name.
+- **Fetch if needed**: GET /api/salons/{salonId} returns full details (images, address, business_hours, etc.). Use it when you need more than you have.
+- **Fulfill the request**: Use the data to do what they asked—picture, address, a link to open in maps, hours, whatever. Use your own judgment; you don’t need a rule for every case.
+- **Do NOT** reply by re-listing the full salon or booking list. Show only what they asked for.
 
 **DATA QUERIES** – Understand intent in any wording or language (like ChatGPT). Infer: what they want (bookings, salons, favorites, services), time/scope (past, upcoming, a date, "other times", "all"), amount ("all" → limit 500). Call make_api_request when you need data. **FOLLOW-UPS** ("Which is the closest?", "what about other days?"): answer from data you already showed; only call when you need fresh data. After you get data, **use HTML <output> with ai-card (data-salon-id or data-booking-id) for any list the user can act on** (tap to view, book, cancel)—it makes the task fast. NEVER output raw JSON.
 
@@ -114,9 +114,9 @@ After fetching data, decide how to display it:
    - class="ai-card" for clickable cards
    - data-salon-id="..." for salon navigation  
    - data-booking-id="..." for booking navigation
-   - class="ai-image" for images: <img class="ai-image" src="{url}" alt="..." style="max-width:100%;border-radius:8px;" />
+   - class="ai-image" for images
    - Use proper HTML structure for lists, cards, and interactive elements
-2. **For a salon's picture/image only**: Use GET /api/salons/{salonId} to get \`images\`[], then <output><img class="ai-image" src="{images[0]}" alt="{name}" style="max-width:100%;border-radius:8px;" /></output>. Do NOT re-output the full salon list.
+2. **When they ask for one specific thing about one item** (picture, address, "open in maps", etc.): show only that. Do not re-output the full list.
 3. **For simple informational responses or formatted text**: Use Markdown format:
    - Use **bold** for emphasis
    - Use - or * for lists
@@ -139,7 +139,7 @@ SALONS (for "best", "top rated", "popular", "recommend" → /api/salons/search?s
 - GET /api/salons/search – q, latitude, longitude, sort=rating|distance|name, min_rating
 - GET /api/salons/popular – no params; top-rated salons
 - GET /api/salons/nearby – latitude, longitude, max_distance
-- GET /api/salons/{salonId} – full salon including \`images\`[] (URLs). Use for "picture of the salon", "show me that one", "image", "photo", address, hours.
+- GET /api/salons/{salonId} – full salon (images, address, business_hours, etc.). Use when the user asks for something about one salon you showed.
 - GET /api/salons/recommendations/personalized
 
 SERVICES:
@@ -317,8 +317,8 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
             name: 'make_api_request',
             description: `Fetch data when you need it. Understand intent in any wording or language.
 When the user wants to book or find a salon ("best", "top rated", "popular", "recommend"): call /api/salons/search with sort=rating and latitude/longitude (from Location), or /api/salons/popular. Do NOT say "I can't"—these exist. Always render salon and booking lists as HTML <output> with ai-card and data-salon-id or data-booking-id so the user can tap and act fast.
-When the user asks for a **picture, image, or photo** of "the salon" or one you just showed: call GET /api/salons/{salonId} (id from data-salon-id in the card you showed, or /api/salons/search?q=name). Response has \`images\`[]. Render <img class="ai-image" src="{images[0]}" ...> in <output>. Do NOT re-output the full salon list.
-Other: /api/bookings (upcoming, limit, page), /api/salons/nearby (latitude, longitude), /api/salons/search (q, latitude, longitude, sort=rating|distance|name), /api/salons/{salonId} (returns images[]), /api/favorites, /api/services/categories. For follow-ups about what you just showed, answer from the conversation; only call when you need new data. Never raw JSON. Location: ${locationInfo}.`,
+When the user asks for **one specific thing about one salon or booking** you showed (picture, address, "open in maps", hours, etc.): resolve it (data-salon-id or /api/salons/search?q=name), call GET /api/salons/{id} if you need more data, use the data to fulfill the request, and do NOT re-list everything.
+Other: /api/bookings, /api/salons/nearby, /api/salons/search, /api/salons/{salonId} (full details: images, address, etc.), /api/favorites, /api/services/categories. For follow-ups, answer from context; only call when you need new data. Never raw JSON. Location: ${locationInfo}.`,
             parameters: {
               type: 'OBJECT',
               properties: {
