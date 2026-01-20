@@ -1044,6 +1044,35 @@ Other: /api/bookings (upcoming, limit, page), /api/salons/nearby (latitude, long
         } catch (e) { /* leave aiResponse as is */ }
       }
 
+      // If the model replied with the generic "How can I help you?" / "Waar kan ik je mee helpen?" but the user
+      // clearly asked for salons (best, recommend, book at best salon, etc.), fetch and show cards instead.
+      const isGenericHelp = aiResponse && !/<output>/.test(aiResponse) && (
+        (/How can I help you\?/i.test(aiResponse) && /bookings|salon|appointment/i.test(aiResponse)) ||
+        (/Waar kan ik je mee helpen\?/i.test(aiResponse) && /boekingen|salon|afspraak/i.test(aiResponse))
+      );
+      const userWantsSalons = /\b(best|top|rated|recommend|popular|efficient|salon)\b/i.test(message) ||
+        (/\bbook\b/i.test(message) && /\b(appointment|salon)\b/i.test(message));
+      if (isGenericHelp && userWantsSalons) {
+        try {
+          const loc = userContext?.location;
+          const q = loc ? { sort: 'rating', latitude: String(loc.latitude), longitude: String(loc.longitude) } : {};
+          const ep = Object.keys(q).length >= 3 ? '/api/salons/search' : '/api/salons/popular';
+          const res = await this.makeApiRequest(userId, userToken, 'GET', ep, null, q);
+          let arr = Array.isArray(res?.data) ? res.data : res?.data?.data || res?.data?.salons || [];
+          if (arr.length > 0) {
+            const cards = arr.slice(0, 10).map(s => {
+              const sid = s.id || '';
+              const name = s.business_name || s.name || 'Salon';
+              const r = s.rating_average != null ? ` ${Number(s.rating_average).toFixed(1)}` : '';
+              return `<div class="ai-card" data-salon-id="${sid}" style="padding:12px;margin:8px 0;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;"><strong>${name}</strong>${r}</div>`;
+            }).join('');
+            const head = userContext?.language === 'nl' ? 'Top salons om te boeken:' : 'Top salons to book:';
+            aiResponse = `<output><p>${head}</p>${cards}</output>`;
+            console.log('🔄 Replaced generic "How can I help" with salon cards (user asked for salons)');
+          }
+        } catch (e) { /* leave aiResponse as is */ }
+      }
+
       // Check if response contains GenUI/A2UI commands (legacy support - not actively used)
       // The AI might include GenUI commands in its response, but we primarily use HTML now
       let genuiMetadata = null;
