@@ -83,24 +83,22 @@ REVIEWS:
 
 When users ask questions, use make_api_request to fetch relevant data. After fetching data, decide how to display it:
 
-1. **For structured data (bookings, salons, lists)**: Generate GenUI JSON using beginRendering command with appropriate components (List, Card, etc.)
+1. **For structured data (bookings, salons, lists, cards)**: Use HTML in <output> tags with these CSS classes:
+   - class="ai-card" for clickable cards
+   - data-salon-id="..." for salon navigation  
+   - data-booking-id="..." for booking navigation
+   - class="ai-image" for images
+   - Use proper HTML structure for lists, cards, and interactive elements
 
-2. **For simple informational responses or lists**: Use Markdown format:
+2. **For simple informational responses or formatted text**: Use Markdown format:
    - Use **bold** for emphasis
    - Use - or * for lists
    - Use ## for headers
    - Example: "You have the following bookings today:\n- **Salon Name** at 13:15\n- **Another Salon** at 14:30"
 
-3. **For interactive UI elements**: Use HTML in <output> tags with these CSS classes:
-   - class="ai-card" for clickable cards
-   - data-salon-id="..." for salon navigation  
-   - data-booking-id="..." for booking navigation
-   - class="ai-image" for images
-
 Choose the format that best fits the data:
-- GenUI: For complex, interactive UI with multiple components
-- Markdown: For simple lists, formatted text, or informational responses
-- HTML: For specific interactive elements like clickable cards
+- HTML in <output> tags: For structured data, interactive UI, cards, lists that need styling
+- Markdown: For simple formatted text, informational responses, or when you just need basic formatting
 
 ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in English'}
 
@@ -590,7 +588,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in 
         console.log(`📝 New conversation - adding system prompt`);
         chatHistory.unshift({
           role: 'model',
-          parts: [{ text: 'I understand. I will ALWAYS use function calls when users ask for data, and then generate GenUI to display it.' }]
+          parts: [{ text: 'I understand. I will ALWAYS use function calls when users ask for data, and then display it using HTML in <output> tags or Markdown format.' }]
         });
         chatHistory.unshift({
           role: 'user',
@@ -672,7 +670,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in 
 
         // Send function responses back to the model
         if (functionResponses.length > 0) {
-          // Store the last function response data for GenUI generation
+          // Store the last function response data for HTML/UI generation
           const lastResponseData = functionResponses[functionResponses.length - 1]?.functionResponse?.response?.data;
           
           result = await chat.sendMessage(functionResponses);
@@ -785,11 +783,11 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
             let followUpPrompt = '';
             
             if (messageLower.includes('booking') || messageLower.includes('boeking')) {
-              followUpPrompt = 'Je hebt de boekingen opgehaald. Geef nu een samenvatting in het Nederlands en genereer GenUI JSON om ze in een lijst weer te geven. Gebruik het beginRendering commando met een List component met Card items voor elke booking. Gebruik de exacte data die je hebt ontvangen.';
+              followUpPrompt = 'Je hebt de boekingen opgehaald. Geef nu een samenvatting in het Nederlands en toon ze in HTML in <output> tags met ai-card elementen voor elke booking. Gebruik de exacte data die je hebt ontvangen.';
             } else if (messageLower.includes('salon') || messageLower.includes('kapper')) {
-              followUpPrompt = 'Je hebt de salons opgehaald. Geef nu een samenvatting in het Nederlands en genereer GenUI JSON om ze in een lijst weer te geven. Gebruik de exacte data die je hebt ontvangen.';
+              followUpPrompt = 'Je hebt de salons opgehaald. Geef nu een samenvatting in het Nederlands en toon ze in HTML in <output> tags met ai-card elementen voor elke salon. Gebruik de exacte data die je hebt ontvangen.';
             } else {
-              followUpPrompt = 'Je hebt de data opgehaald. Geef nu een samenvatting en genereer GenUI JSON om de data visueel weer te geven. Gebruik de exacte data die je hebt ontvangen.';
+              followUpPrompt = 'Je hebt de data opgehaald. Geef nu een samenvatting en toon de data in HTML in <output> tags met geschikte styling. Gebruik de exacte data die je hebt ontvangen.';
             }
             
             const followUpResult = await chat.sendMessage(followUpPrompt);
@@ -818,8 +816,8 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
         }
       }
 
-      // Check if response contains GenUI/A2UI commands
-      // The AI might include GenUI commands in its response
+      // Check if response contains GenUI/A2UI commands (legacy support - not actively used)
+      // The AI might include GenUI commands in its response, but we primarily use HTML now
       let genuiMetadata = null;
       try {
         // Try to parse GenUI commands from response text (JSON code blocks)
@@ -866,7 +864,7 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
           }
         }
       } catch (e) {
-        // If parsing fails, continue without GenUI
+        // If parsing fails, continue without GenUI (legacy support)
       }
 
       // Save AI response
