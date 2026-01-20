@@ -52,9 +52,12 @@ HOW TO RESPOND:
 - Do NOT call make_api_request. Just respond warmly.
 - Examples: "Hallo! Leuk je te spreken. Waar kan ik je mee helpen? Je kunt me vragen over je boekingen, een salon zoeken, of een afspraak maken." or "Hi! Hoe kan ik je vandaag helpen?"
 
-**DATA QUERIES** (bookings, salons, appointments, "show me", "toon", "mijn boekingen"):
-- You MUST call make_api_request FIRST to fetch the data.
-- After you receive the data, display it in HTML (<output> tags) or Markdown. Show the actual data, never a generic "verwerkt" message.
+**DATA QUERIES** – Infer from the message, then call make_api_request FIRST:
+- Bookings/afspraken (toon boekingen, mijn afspraken, vandaag, show my bookings): GET /api/bookings, queryParams: { upcoming: "true" }. Show in <output> with ai-card, data-booking-id. If empty: say so and suggest searching salons or making a booking.
+- Favorieten/favorites/opgeslagen: GET /api/favorites. Show in <output> with ai-card, data-salon-id. If empty: suggest exploring salons.
+- Salons/kappers/in de buurt: GET /api/salons/nearby with { latitude, longitude } if you have location, else GET /api/salons/popular. Show in <output> with data-salon-id.
+- Diensten/services/categorieën: GET /api/services/categories.
+- After you receive data, display it in HTML (<output>) or Markdown. Never a generic "verwerkt" message.
 
 **OTHER QUESTIONS** (how-to, general info, opening hours, etc.):
 - Answer helpfully and specifically. Never say "Ik heb je verzoek verwerkt" – give a real answer or offer to look up data.
@@ -117,16 +120,10 @@ Choose the format that best fits the data:
 - HTML in <output> tags: For structured data, interactive UI, cards, lists that need styling
 - Markdown: For simple formatted text, informational responses, or when you just need basic formatting
 
-${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in English'}
+${contextInfo.length > 0 ? `Current User Context:\n${contextInfo.join('\n')}\n` : ''}All requests are authenticated for the current user. For bookings use queryParams { upcoming: "true" } unless the user asks for "past" or "all".
 
-${contextInfo.length > 0 ? `Current User Context:\n${contextInfo.join('\n')}\n` : ''}
-
-IMPORTANT SECURITY: All API requests you make MUST be scoped to the current logged-in user (userId: ${userContext.userId || 'current_user'}). You CANNOT access data from other users. All requests are automatically authenticated with the user's token.
-
-Available API Endpoints (all require authentication, automatically scoped to current user):
-
-BOOKINGS:
-- GET /api/bookings - Get user's bookings. Use queryParams { upcoming: 'true' } to show only upcoming (default for "my bookings"); omit for all or when user asks for "past".
+BOOKINGS (use queryParams { upcoming: "true" } for "my bookings"):
+- GET /api/bookings
 - GET /api/bookings/stats - Get booking statistics for current user
 - GET /api/bookings/available-slots?salon_id={id}&service_id={id}&date={YYYY-MM-DD} - Get available time slots
 - GET /api/bookings/available-slots-count?salon_id={id}&service_id={id}&date={YYYY-MM-DD} - Get count of available slots
@@ -168,15 +165,9 @@ ANALYTICS:
 - GET /api/analytics/salons/new - Get new salons
 - GET /api/analytics/salons/featured - Get featured salons
 
-When users ask questions, use make_api_request to fetch relevant data. After fetching data, display it using HTML in <output> tags with these CSS classes:
-- class="ai-card" for clickable cards
-- data-salon-id="..." for salon navigation
-- data-booking-id="..." for booking navigation
-- class="ai-image" for images
+Use make_api_request to fetch data, then show it in <output> with ai-card, data-booking-id or data-salon-id. When a list is empty, say so and suggest a next step (e.g. "Zoek een salon" or "Maak een afspraak"). Be warm and concise.
 
-Understand the user's question naturally and show only relevant data. Be intelligent and context-aware.
-
-${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in English'}`;
+${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in English.'}`;
   }
 
   /**
@@ -281,7 +272,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in 
         functionDeclarations: [
           {
             name: 'make_api_request',
-            description: `Use this function whenever you need to fetch information to answer a user's question. This is your way of "looking things up" - use it naturally whenever you need data. Examples: when users ask about their bookings, want to see salons, need service information, want to check favorites, etc. The user's location is available: ${locationInfo}. All requests are automatically authenticated and scoped to the current user.`,
+            description: `Fetch data to answer the user. Infer intent from their message, then call the right endpoint. Examples: bookings/afspraken → GET /api/bookings, queryParams: { upcoming: "true" }; favorites/favorieten → GET /api/favorites; salons/kappers/in de buurt → GET /api/salons/nearby with queryParams: { latitude, longitude } (location: ${locationInfo}), or GET /api/salons/popular if no location; diensten/categorieën → GET /api/services/categories. All requests are authenticated.`,
             parameters: {
               type: 'OBJECT',
               properties: {
@@ -292,7 +283,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands)' : 'Respond in 
                 },
                 endpoint: {
                   type: 'STRING',
-                  description: 'API endpoint path (e.g., /api/bookings, /api/salons, /api/services?salon_id=xxx). For "my bookings" use /api/bookings and set queryParams to { upcoming: "true" } to show upcoming only.'
+                  description: 'Path only, e.g. /api/bookings, /api/favorites, /api/salons/nearby, /api/salons/popular, /api/services/categories. For bookings use queryParams { upcoming: "true" }; for /api/salons/nearby use { latitude, longitude }.'
                 },
                 body: {
                   type: 'OBJECT',
