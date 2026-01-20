@@ -57,7 +57,7 @@ HOW TO RESPOND:
 - Time/scope: past, upcoming, today, yesterday, all, everything, last week, etc.
 - Amount: all / everything / alle → use limit (e.g. 500) when the API supports it; a few / some → default limits are fine.
 - Filters: date, location, status, search query—map to the endpoint’s query params.
-Then call make_api_request with the right endpoint and queryParams. Supported params: /api/bookings → upcoming ("true"|"false"), limit, page; /api/salons/search → q, lat, lng, max_distance, sort; /api/salons/nearby → latitude, longitude; /api/favorites, /api/services/categories → no extra params. After you get data, ALWAYS render as HTML <output> (ai-card, data-booking-id or data-salon-id) or Markdown. NEVER output raw JSON.
+Then call make_api_request with the right endpoint and queryParams. Supported params: /api/bookings → upcoming ("true"|"false"), limit, page. For yesterday/gisteren or "other days"/andere dagen use upcoming "false" (past); for yesterday, filter the returned list to yesterday's date before showing. /api/salons/search → q, lat, lng, sort; /api/salons/nearby → latitude, longitude; /api/favorites, /api/services/categories → no extra params. After you get data, ALWAYS render as HTML <output> (ai-card, data-booking-id or data-salon-id) or Markdown. NEVER output raw JSON.
 
 **OTHER QUESTIONS** (how-to, general info, opening hours, etc.):
 - Answer helpfully and specifically. Never say "Ik heb je verzoek verwerkt" – give a real answer or offer to look up data.
@@ -197,6 +197,14 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     if (messageLower.includes('dienst') || messageLower.includes('service') || messageLower.includes('categorie')) {
       return { endpoint: '/api/services/categories', queryParams: {} };
     }
+    // Bookings: yesterday / gisteren -> past, then filter to yesterday in HTML step
+    if (messageLower.includes('yesterday') || messageLower.includes('gisteren')) {
+      return { endpoint: '/api/bookings', queryParams: { upcoming: 'false' } };
+    }
+    // Bookings: "other days" / "andere dagen" -> past
+    if (messageLower.includes('other days') || messageLower.includes('andere dagen')) {
+      return { endpoint: '/api/bookings', queryParams: { upcoming: 'false' } };
+    }
     // Bookings
     if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('afspraak')) {
       return { endpoint: '/api/bookings', queryParams: { upcoming: 'true' } };
@@ -238,16 +246,24 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
 
     if (isBooking) {
       const wantToday = /vandaag|today/i.test(msg);
+      const wantYesterday = /yesterday|gisteren/i.test(msg);
       const todayStr = new Date().toISOString().split('T')[0];
+      const yesterdayStr = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; })();
       const forToday = wantToday ? dataArray.filter(b => String(b.appointment_date || b.appointmentDate || '').startsWith(todayStr)) : dataArray;
+      const forYesterday = wantYesterday ? dataArray.filter(b => String(b.appointment_date || b.appointmentDate || '').startsWith(yesterdayStr)) : dataArray;
 
       if (wantToday && forToday.length === 0) {
         return lang === 'nl'
           ? 'Je hebt vandaag geen boekingen. Je kunt een salon zoeken of een afspraak maken.'
           : 'You have no bookings for today. You can search for a salon or make an appointment.';
       }
+      if (wantYesterday && forYesterday.length === 0) {
+        return lang === 'nl'
+          ? 'Je had gisteren geen boekingen. Je kunt een salon zoeken of een afspraak maken.'
+          : 'You had no bookings yesterday. You can search for a salon or make an appointment.';
+      }
 
-      const toShow = (wantToday ? forToday : dataArray).slice(0, 20);
+      const toShow = (wantToday ? forToday : wantYesterday ? forYesterday : dataArray).slice(0, 20);
       const now = new Date();
       const bookingCards = toShow.map(booking => {
         const salonName = booking.salon?.business_name || booking.salons?.business_name || booking.salonName || 'Salon';
@@ -769,7 +785,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
       
       // CRITICAL: If user asks for data but AI didn't make function calls, force it
       const messageLowerForced = message.toLowerCase();
-      const isDataQueryForced = /booking|boeking|show me|toon|salon|kapper|gepland|appointment|vandaag|today|favoriet|favorite|opgeslagen|dienst|service|categorie/i.test(messageLowerForced);
+      const isDataQueryForced = /booking|boeking|show me|toon|salon|kapper|gepland|appointment|vandaag|today|yesterday|gisteren|other days|andere dagen|favoriet|favorite|opgeslagen|dienst|service|categorie/i.test(messageLowerForced);
       
       if (isDataQueryForced && currentFunctionCalls.length === 0) {
         console.log('⚠️ Data query detected but NO function calls made! Forcing function call...');
@@ -904,7 +920,7 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
       
       // CRITICAL: If user asked for data but no function calls were made, force them now
       const messageLowerCheck = message.toLowerCase();
-      const isDataQuery = /booking|boeking|show me|toon|salon|kapper|gepland|appointment|vandaag|today|favoriet|favorite|opgeslagen|dienst|service|categorie/i.test(messageLowerCheck);
+      const isDataQuery = /booking|boeking|show me|toon|salon|kapper|gepland|appointment|vandaag|today|yesterday|gisteren|other days|andere dagen|favoriet|favorite|opgeslagen|dienst|service|categorie/i.test(messageLowerCheck);
       
       if (isDataQuery && functionCallCount === 0) {
         console.log('🚨 CRITICAL: Data query detected but NO function calls made! Forcing function call...');
@@ -951,18 +967,25 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
           if (dataArray.length > 0) {
             console.log('📦 Generating HTML directly from', dataArray.length, 'items');
             
-            // Generate HTML cards for bookings
-            if (messageLowerCheck.includes('booking') || messageLowerCheck.includes('boeking') || messageLowerCheck.includes('gepland') || messageLowerCheck.includes('afspraak')) {
+            // Generate HTML cards for bookings (including yesterday, other days → we fetch past and filter or show all)
+            if (messageLowerCheck.includes('booking') || messageLowerCheck.includes('boeking') || messageLowerCheck.includes('gepland') || messageLowerCheck.includes('afspraak') || messageLowerCheck.includes('yesterday') || messageLowerCheck.includes('gisteren') || messageLowerCheck.includes('other days') || messageLowerCheck.includes('andere dagen')) {
               const wantToday = /vandaag|today/i.test(messageLowerCheck);
+              const wantYesterday = /yesterday|gisteren/i.test(messageLowerCheck);
               const todayStr = new Date().toISOString().split('T')[0];
+              const yesterdayStr = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; })();
               const forToday = wantToday ? dataArray.filter(b => String(b.appointment_date || b.appointmentDate || '').startsWith(todayStr)) : dataArray;
+              const forYesterday = wantYesterday ? dataArray.filter(b => String(b.appointment_date || b.appointmentDate || '').startsWith(yesterdayStr)) : dataArray;
 
               if (wantToday && forToday.length === 0) {
                 aiResponse = userContext?.language === 'nl'
                   ? 'Je hebt vandaag geen boekingen. Je kunt een salon zoeken of een afspraak maken.'
                   : 'You have no bookings for today. You can search for a salon or make an appointment.';
+              } else if (wantYesterday && forYesterday.length === 0) {
+                aiResponse = userContext?.language === 'nl'
+                  ? 'Je had gisteren geen boekingen. Je kunt een salon zoeken of een afspraak maken.'
+                  : 'You had no bookings yesterday. You can search for a salon or make an appointment.';
               } else {
-              const toShow = (wantToday ? forToday : dataArray).slice(0, 10);
+              const toShow = (wantToday ? forToday : wantYesterday ? forYesterday : dataArray).slice(0, 10);
               const now = new Date();
               const bookingCards = toShow.map(booking => {
                 const salonName = booking.salon?.business_name || booking.salons?.business_name || booking.salon_name || 'Salon';
@@ -1026,7 +1049,7 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
             }
           } else {
             // No data found
-            if (/booking|boeking|gepland|afspraak/i.test(messageLowerCheck)) aiResponse = 'Je hebt geen boekingen gevonden.';
+            if (/booking|boeking|gepland|afspraak|yesterday|gisteren|other days|andere dagen/i.test(messageLowerCheck)) aiResponse = 'Je hebt geen boekingen gevonden.';
             else if (/favoriet|favorite|opgeslagen/i.test(messageLowerCheck)) aiResponse = 'Je hebt nog geen favoriete salons.';
             else if (/salon|kapper/i.test(messageLowerCheck)) aiResponse = 'Geen salons gevonden.';
             else aiResponse = 'Geen resultaten gevonden.';
