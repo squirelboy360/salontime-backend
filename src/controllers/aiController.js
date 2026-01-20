@@ -166,6 +166,11 @@ ANALYTICS:
 
 Use make_api_request to fetch data, then show it in <output> with ai-card, data-booking-id or data-salon-id. When a list is empty, say so and suggest a next step (e.g. "Zoek een salon" or "Maak een afspraak"). Be warm and concise.
 
+CRITICAL – Match your text to what you show:
+- If you render <output> cards: do NOT say "You have no bookings" or "There are no X" without a scope—it contradicts the UI. Use e.g. "No bookings for today. Here’s your next upcoming:" then the cards. Do not repeat the card content (salon, service, date, time) in your text; the cards show it.
+- If the user asked for a narrow scope (e.g. today) and you have 0 for that but 1+ for another (e.g. upcoming): one short intro, then only <output> cards—no duplicate listing in prose.
+- If you have nothing to show: say "No [bookings] for [today]" and do not render cards; suggest a next step.
+
 ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in English.'}`;
   }
 
