@@ -57,7 +57,7 @@ HOW TO RESPOND:
 - Time/scope: past, upcoming, today, yesterday, all, everything, last week, etc.
 - Amount: all / everything / alle → use limit (e.g. 500) when the API supports it; a few / some → default limits are fine.
 - Filters: date, location, status, search query—map to the endpoint’s query params.
-Then call make_api_request with the right endpoint and queryParams. Supported params: /api/bookings → upcoming ("true"|"false"), limit, page. For yesterday/gisteren or "other days"/"others days"/andere dagen use upcoming "false" (past); for yesterday, filter the returned list to yesterday's date before showing. /api/salons/search → q, lat, lng, sort; /api/salons/nearby → latitude, longitude; /api/favorites, /api/services/categories → no extra params. After you get data, ALWAYS render as HTML <output> (ai-card, data-booking-id or data-salon-id) or Markdown. NEVER output raw JSON.
+Then call make_api_request with the right endpoint and queryParams. Supported params: /api/bookings → upcoming ("true"|"false"), limit, page. For past/afgelopen/yesterday/other days/all/alle use upcoming "false" and limit 500 so the user sees all their past bookings. For yesterday, filter the returned list to yesterday's date before showing. /api/salons/search → q, lat, lng, sort; /api/salons/nearby → latitude, longitude; /api/favorites, /api/services/categories → no extra params. After you get data, ALWAYS render as HTML <output> (ai-card, data-booking-id or data-salon-id) or Markdown. NEVER output raw JSON.
 
 **OTHER QUESTIONS** (how-to, general info, opening hours, etc.):
 - Answer helpfully and specifically. Never say "Ik heb je verzoek verwerkt" – give a real answer or offer to look up data.
@@ -197,20 +197,29 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     if (messageLower.includes('dienst') || messageLower.includes('service') || messageLower.includes('categorie')) {
       return { endpoint: '/api/services/categories', queryParams: {} };
     }
-    // Bookings: yesterday / gisteren -> past, then filter to yesterday in HTML step
+    // Bookings: yesterday / gisteren -> past, high limit, then filter to yesterday in HTML step
     if (messageLower.includes('yesterday') || messageLower.includes('gisteren')) {
-      return { endpoint: '/api/bookings', queryParams: { upcoming: 'false' } };
+      return { endpoint: '/api/bookings', queryParams: { upcoming: 'false', limit: '500' } };
     }
-    // Bookings: "other days", "others days", "andere dagen" -> past
+    // Bookings: "other days", "others days", "andere dagen" -> past, high limit
     if (messageLower.includes('other days') || messageLower.includes('others days') || messageLower.includes('other day') || messageLower.includes('andere dagen')) {
-      return { endpoint: '/api/bookings', queryParams: { upcoming: 'false' } };
+      return { endpoint: '/api/bookings', queryParams: { upcoming: 'false', limit: '500' } };
     }
-    // Bookings
+    // Bookings: past / afgelopen / verleden -> past, high limit
+    if (messageLower.includes('past') || messageLower.includes('afgelopen') || messageLower.includes('verleden')) {
+      return { endpoint: '/api/bookings', queryParams: { upcoming: 'false', limit: '500' } };
+    }
+    // Bookings: "all" / "alle" (in booking context) -> past, high limit
+    if (/\b(all|alle)\b/.test(messageLower) &&
+        (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('afspraak'))) {
+      return { endpoint: '/api/bookings', queryParams: { upcoming: 'false', limit: '500' } };
+    }
+    // Bookings: default -> upcoming
     if (messageLower.includes('booking') || messageLower.includes('boeking') || messageLower.includes('gepland') || messageLower.includes('afspraak')) {
-      return { endpoint: '/api/bookings', queryParams: { upcoming: 'true' } };
+      return { endpoint: '/api/bookings', queryParams: { upcoming: 'true', limit: '100' } };
     }
     // Generic: default to upcoming bookings
-    return { endpoint: '/api/bookings', queryParams: { upcoming: 'true' } };
+    return { endpoint: '/api/bookings', queryParams: { upcoming: 'true', limit: '100' } };
   }
 
   /**
@@ -263,7 +272,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
           : 'You had no bookings yesterday. You can search for a salon or make an appointment.';
       }
 
-      const toShow = (wantToday ? forToday : wantYesterday ? forYesterday : dataArray).slice(0, 20);
+      const toShow = (wantToday ? forToday : wantYesterday ? forYesterday : dataArray).slice(0, 100);
       const now = new Date();
       const bookingCards = toShow.map(booking => {
         const salonName = booking.salon?.business_name || booking.salons?.business_name || booking.salonName || 'Salon';
@@ -808,14 +817,20 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
         for (const functionCall of currentFunctionCalls) {
           if (functionCall.name === 'make_api_request') {
             try {
-              const { method, endpoint, body, queryParams } = functionCall.args;
+              let { method, endpoint, body, queryParams } = functionCall.args;
+              queryParams = { ...(queryParams || {}) };
+              // For past bookings, request more so users with many past bookings see them
+              if (String(endpoint || '').includes('/api/bookings') && (queryParams.upcoming === 'false' || queryParams.upcoming === false)) {
+                const L = parseInt(queryParams.limit, 10);
+                if (!L || L < 100) queryParams.limit = '500';
+              }
               const apiResponse = await this.makeApiRequest(
                 userId,
                 userToken,
                 method,
                 endpoint,
                 body,
-                queryParams || {}
+                queryParams
               );
 
               functionResponses.push({
@@ -985,7 +1000,7 @@ Maak HTML cards met class="ai-card" en gebruik data-salon-id of data-booking-id 
                   ? 'Je had gisteren geen boekingen. Je kunt een salon zoeken of een afspraak maken.'
                   : 'You had no bookings yesterday. You can search for a salon or make an appointment.';
               } else {
-              const toShow = (wantToday ? forToday : wantYesterday ? forYesterday : dataArray).slice(0, 10);
+              const toShow = (wantToday ? forToday : wantYesterday ? forYesterday : dataArray).slice(0, 100);
               const now = new Date();
               const bookingCards = toShow.map(booking => {
                 const salonName = booking.salon?.business_name || booking.salons?.business_name || booking.salon_name || 'Salon';
