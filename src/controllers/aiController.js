@@ -244,6 +244,49 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     return `<output><p style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">${heading}:</p>${dataCards}</output>`;
   }
 
+  // Resolve salon id from conversation (last data-salon-id in assistant messages)
+  _getSalonIdFromHistory(historyMessages) {
+    if (!Array.isArray(historyMessages)) return null;
+    for (let i = historyMessages.length - 1; i >= 0; i--) {
+      const m = historyMessages[i];
+      if (m?.role === 'assistant' && typeof m.content === 'string') {
+        const match = m.content.match(/data-salon-id="([^"]+)"/);
+        if (match) return match[1];
+      }
+    }
+    return null;
+  }
+
+  // When the user asked for one thing about one salon (picture, location, maps) but the AI failed:
+  // fetch that salon and return HTML (image or maps link). historyMessages from conversation.
+  async _oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken) {
+    const salonId = this._getSalonIdFromHistory(historyMessages);
+    if (!salonId) return null;
+    let res;
+    try {
+      res = await this.makeApiRequest(userId, userToken, 'GET', `/api/salons/${salonId}`, null, {});
+    } catch (e) { return null; }
+    const salon = res?.data?.data || res?.data;
+    if (!salon) return null;
+    const lang = userContext?.language === 'nl';
+    const isImage = /\b(picture|image|photo)\b|where is the picture/i.test(message);
+    if (isImage) {
+      const url = Array.isArray(salon.images) && salon.images[0] ? salon.images[0] : (typeof salon.images === 'string' ? salon.images : null);
+      if (url) {
+        return `<output><p><strong>${salon.business_name || 'Salon'}</strong></p><img class="ai-image" src="${url}" alt="${(salon.business_name || 'Salon').replace(/"/g, '&quot;')}" style="max-width:100%;border-radius:8px;" /></output>`;
+      }
+      return `<output><p>${salon.business_name || 'Salon'}: ${lang ? 'Geen afbeelding beschikbaar.' : 'No image available.'}</p></output>`;
+    }
+    // location, address, maps, map, navigate, "show me in maps", "in a map"
+    const addr = [salon.address, salon.city, salon.zip_code].filter(Boolean).join(', ') || (lang ? 'Adres niet beschikbaar' : 'Address not available');
+    const lat = salon.latitude; const lng = salon.longitude;
+    const mapsUrl = (lat != null && lng != null)
+      ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
+      : (salon.address || salon.city ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(salon.address || salon.city || '')}` : null);
+    const link = mapsUrl ? `<a href="${mapsUrl}" target="_blank" rel="noopener">${lang ? 'Open in Google Maps' : 'Open in Google Maps'}</a>` : '';
+    return `<output><p><strong>${salon.business_name || 'Salon'}</strong></p><p>${addr}</p>${link}</output>`;
+  }
+
   // Make authenticated API request on behalf of user
   async makeApiRequest(userId, userToken, method, endpoint, body = null, queryParams = {}) {
     try {
@@ -1054,31 +1097,50 @@ Other: /api/bookings, /api/salons/nearby, /api/salons/search, /api/salons/{salon
 
       // If the model replied with the generic "How can I help you?" / "Waar kan ik je mee helpen?" but the user
       // clearly asked for salons (best, recommend, book at best salon, etc.), fetch and show cards instead.
+      // BUT: if they asked for ONE thing about ONE salon (picture, location, maps), show that—not the full list.
       const isGenericHelp = aiResponse && !/<output>/.test(aiResponse) && (
         (/How can I help you\?/i.test(aiResponse) && /bookings|salon|appointment/i.test(aiResponse)) ||
         (/Waar kan ik je mee helpen\?/i.test(aiResponse) && /boekingen|salon|afspraak/i.test(aiResponse))
       );
       const userWantsSalons = /\b(best|top|rated|recommend|popular|efficient|salon)\b/i.test(message) ||
         (/\bbook\b/i.test(message) && /\b(appointment|salon)\b/i.test(message));
+      const isOneSpecificThing = /\b(picture|image|photo|location|address|maps|map|navigate)\b|where is the picture|show me in maps|in a map/i.test(message);
       if (isGenericHelp && userWantsSalons) {
+        if (isOneSpecificThing) {
+          try {
+            const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
+            if (html) { aiResponse = html; console.log('🔄 Replaced generic with one-salon detail (picture/maps)'); }
+          } catch (e) { /* leave generic */ }
+        } else {
+          try {
+            const loc = userContext?.location;
+            const q = loc ? { sort: 'rating', latitude: String(loc.latitude), longitude: String(loc.longitude) } : {};
+            const ep = Object.keys(q).length >= 3 ? '/api/salons/search' : '/api/salons/popular';
+            const res = await this.makeApiRequest(userId, userToken, 'GET', ep, null, q);
+            let arr = Array.isArray(res?.data) ? res.data : res?.data?.data || res?.data?.salons || [];
+            if (arr.length > 0) {
+              const cards = arr.slice(0, 10).map(s => {
+                const sid = s.id || ''; const name = s.business_name || s.name || 'Salon';
+                const r = s.rating_average != null ? ` ${Number(s.rating_average).toFixed(1)}` : '';
+                return `<div class="ai-card" data-salon-id="${sid}" style="padding:12px;margin:8px 0;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;"><strong>${name}</strong>${r}</div>`;
+              }).join('');
+              const head = userContext?.language === 'nl' ? 'Top salons om te boeken:' : 'Top salons to book:';
+              aiResponse = `<output><p>${head}</p>${cards}</output>`;
+              console.log('🔄 Replaced generic "How can I help" with salon cards (user asked for salons)');
+            }
+          } catch (e) { /* leave aiResponse as is */ }
+        }
+      }
+
+      // If the user asked for ONE thing (picture, location, maps) but the AI returned the FULL salon list or
+      // text without an image, replace with the one-salon detail (image or maps link).
+      const looksLikeFullList = (aiResponse && ((aiResponse.match(/data-salon-id/g) || []).length > 1) || /Top salons to book|Gevonden resultaten|to book:/i.test(aiResponse));
+      const askedPictureButNoImg = /\b(picture|image|photo)\b|where is the picture/i.test(message) && aiResponse && !/<img|class="ai-image"/.test(aiResponse);
+      if (isOneSpecificThing && (looksLikeFullList || askedPictureButNoImg)) {
         try {
-          const loc = userContext?.location;
-          const q = loc ? { sort: 'rating', latitude: String(loc.latitude), longitude: String(loc.longitude) } : {};
-          const ep = Object.keys(q).length >= 3 ? '/api/salons/search' : '/api/salons/popular';
-          const res = await this.makeApiRequest(userId, userToken, 'GET', ep, null, q);
-          let arr = Array.isArray(res?.data) ? res.data : res?.data?.data || res?.data?.salons || [];
-          if (arr.length > 0) {
-            const cards = arr.slice(0, 10).map(s => {
-              const sid = s.id || '';
-              const name = s.business_name || s.name || 'Salon';
-              const r = s.rating_average != null ? ` ${Number(s.rating_average).toFixed(1)}` : '';
-              return `<div class="ai-card" data-salon-id="${sid}" style="padding:12px;margin:8px 0;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;"><strong>${name}</strong>${r}</div>`;
-            }).join('');
-            const head = userContext?.language === 'nl' ? 'Top salons om te boeken:' : 'Top salons to book:';
-            aiResponse = `<output><p>${head}</p>${cards}</output>`;
-            console.log('🔄 Replaced generic "How can I help" with salon cards (user asked for salons)');
-          }
-        } catch (e) { /* leave aiResponse as is */ }
+          const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
+          if (html) { aiResponse = html; console.log('🔄 Replaced full list / text with one-salon detail (picture/maps)'); }
+        } catch (e) { /* leave as is */ }
       }
 
       // Check if response contains GenUI/A2UI commands (legacy support - not actively used)
