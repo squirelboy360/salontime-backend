@@ -37,5 +37,9 @@ router.get('/stripe/dashboard-link', salonController.getStripeDashboardLink);
 router.post('/images', salonImageUpload, salonController.uploadSalonImage);
 router.delete('/images', salonController.deleteSalonImage);
 
+// Tracking routes (can be called with or without auth)
+router.post('/:salonId/track-view', salonController.trackSalonView);
+router.post('/:salonId/track-favorite', salonController.trackSalonFavorite);
+
 module.exports = router;
 

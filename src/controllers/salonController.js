@@ -1536,7 +1536,6 @@ class SalonController {
       throw new AppError('Failed to delete salon image', 500, 'SALON_IMAGE_DELETE_FAILED');
     }
   });
-}
 
   /**
    * Track salon view/impression

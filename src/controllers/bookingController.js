@@ -132,6 +132,16 @@ class BookingController {
 
       console.log('✅ Booking created successfully:', booking?.id);
 
+      // Increment salon booking count for analytics
+      try {
+        await supabaseAdmin.rpc('increment_salon_booking_count', {
+          salon_id_param: salon_id
+        });
+      } catch (countError) {
+        console.error('⚠️ Failed to increment booking count:', countError);
+        // Don't fail the booking if count increment fails
+      }
+
       // Create pending payment record linked to booking
       let paymentRecord = null;
       try {

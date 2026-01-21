@@ -146,7 +146,6 @@ app.use('/api/user', userSettingsRoutes);
 app.use('/api/salons', salonRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/bookings', bookingRoutes);
-app.use('/api/analytics', require('./routes/analyticsRoutes'));
 app.use('/api/payments', paymentRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
