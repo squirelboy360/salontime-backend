@@ -1,5 +1,5 @@
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
-const { supabase } = require('../config/database');
+const { supabase, supabaseAdmin } = require('../config/database');
 
 class ServiceController {
   // Get all services for a salon
@@ -75,7 +75,8 @@ class ServiceController {
       // Convert empty string category_id to null
       const categoryIdValue = category_id && category_id.trim() !== '' ? category_id : null;
 
-      const { data: service, error } = await supabase
+      // Use admin client to bypass RLS (salon owner is authenticated and owns the salon)
+      const { data: service, error } = await supabaseAdmin
         .from('services')
         .insert({
           salon_id: salonId,
@@ -184,7 +185,8 @@ class ServiceController {
     const salonId = salon.id;
 
     try {
-      const { error } = await supabase
+      // Use admin client to bypass RLS (salon owner is authenticated and owns the salon)
+      const { error } = await supabaseAdmin
         .from('services')
         .delete()
         .eq('id', serviceId)
