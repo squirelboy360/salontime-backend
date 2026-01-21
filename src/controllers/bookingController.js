@@ -1384,23 +1384,14 @@ class BookingController {
           .update({
             status: 'pending', 
             amount: amount,
-            updated_at: new Date().toISOString(),
           })
           .eq('id', existingPayment.id);
 
         if (updateError) {
           console.error('❌ Error updating payment:', updateError);
-          // Fallback: try status 'unpaid' if 'pending' violates constraint
-          const { error: fallbackError } = await supabaseAdmin
-            .from('payments')
-            .update({
-              status: 'unpaid',
-              amount: amount,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', existingPayment.id);
-          
-          if (fallbackError) throw new AppError('Failed to update payment', 500, 'PAYMENT_UPDATE_FAILED');
+          // Fallback: try status 'completed' if 'pending' is blocked (only for testing)
+          // We need the user to run migrations to fix this.
+          throw new AppError('Failed to update payment. Database constraint error.', 500, 'PAYMENT_UPDATE_FAILED');
         }
         console.log(`✅ Payment updated`);
       } else {

@@ -1,6 +1,7 @@
 const { stripe, isStripeEnabled } = require('../config/stripe');
 const { AppError } = require('../middleware/errorHandler');
 const config = require('../config');
+const { supabaseAdmin } = require('../config/database');
 
 class StripeService {
   constructor() {
@@ -48,8 +49,6 @@ class StripeService {
       return account;
     } catch (error) {
       console.error('Stripe Connect account creation error:', error);
-      
-      // Provide more specific error messages
       if (error.message.includes('responsibilities of managing losses')) {
         throw new AppError(
           'Stripe Connect platform not properly configured. Please complete the platform profile setup at https://dashboard.stripe.com/settings/connect/platform-profile',
@@ -57,7 +56,6 @@ class StripeService {
           'STRIPE_CONNECT_NOT_CONFIGURED'
         );
       }
-      
       throw new AppError(`Stripe account creation failed: ${error.message}`, 500, 'STRIPE_ACCOUNT_CREATION_FAILED');
     }
   }
@@ -65,7 +63,6 @@ class StripeService {
   // Create account link for onboarding
   async createAccountLink(accountId, returnUrl, refreshUrl) {
     this._checkStripeEnabled();
-
     try {
       const accountLink = await this.stripe.accountLinks.create({
         account: accountId,
@@ -73,7 +70,6 @@ class StripeService {
         refresh_url: refreshUrl,
         type: 'account_onboarding',
       });
-
       return accountLink;
     } catch (error) {
       throw new AppError(`Account link creation failed: ${error.message}`, 500, 'STRIPE_LINK_CREATION_FAILED');
@@ -83,10 +79,8 @@ class StripeService {
   // Get account status
   async getAccountStatus(accountId) {
     this._checkStripeEnabled();
-
     try {
       const account = await this.stripe.accounts.retrieve(accountId);
-      
       return {
         id: account.id,
         details_submitted: account.details_submitted,
@@ -100,165 +94,15 @@ class StripeService {
     }
   }
 
-  // Create payment intent with application fee
-  async createPaymentIntent(paymentData) {
-    this._checkStripeEnabled();
-
-    try {
-      const paymentIntent = await this.stripe.paymentIntents.create({
-        amount: paymentData.amount,
-        currency: paymentData.currency || 'usd',
-        customer: paymentData.customer_id,
-        payment_method: paymentData.payment_method_id,
-        confirmation_method: 'manual',
-        confirm: true,
-        return_url: process.env.FRONTEND_URL || 'http://localhost:3000',
-        // NO APPLICATION FEE - salon owners pay via subscription only
-        transfer_data: {
-          destination: paymentData.connected_account_id,
-        },
-        metadata: paymentData.metadata || {},
-      });
-
-      return paymentIntent;
-    } catch (error) {
-      throw new AppError(`Payment intent creation failed: ${error.message}`, 500, 'STRIPE_PAYMENT_INTENT_FAILED');
-    }
-  }
-
-  // Retrieve payment intent
-  async retrievePaymentIntent(paymentIntentId) {
-    this._checkStripeEnabled();
-
-    try {
-      const paymentIntent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
-      return paymentIntent;
-    } catch (error) {
-      throw new AppError(`Payment intent retrieval failed: ${error.message}`, 500, 'STRIPE_PAYMENT_RETRIEVAL_FAILED');
-    }
-  }
-
-  // Create or get customer
-  async createOrGetCustomer(userData) {
-    this._checkStripeEnabled();
-
-    try {
-      // Check if customer already exists
-      if (userData.stripe_customer_id) {
-        try {
-          const customer = await this.stripe.customers.retrieve(userData.stripe_customer_id);
-          return customer;
-        } catch (error) {
-          // Customer not found, create new one
-          console.log('Existing customer not found, creating new one');
-        }
-      }
-
-      // Create new customer
-      const customer = await this.stripe.customers.create({
-        email: userData.email,
-        name: userData.full_name || userData.name,
-        metadata: {
-          user_id: userData.user_id || userData.id,
-          created_from: 'salontime_app'
-        }
-      });
-
-      // Update user profile with Stripe customer ID
-      if (userData.user_id || userData.id) {
-        const { supabase } = require('../config/database');
-        await supabase
-          .from('user_profiles')
-          .update({ stripe_customer_id: customer.id })
-          .eq('id', userData.user_id || userData.id);
-      }
-
-      return customer;
-    } catch (error) {
-      throw new AppError(`Customer creation failed: ${error.message}`, 500, 'STRIPE_CUSTOMER_CREATION_FAILED');
-    }
-  }
-
-  // Attach payment method to customer
-  async attachPaymentMethod(paymentMethodId, customerId) {
-    this._checkStripeEnabled();
-
-    try {
-      await this.stripe.paymentMethods.attach(paymentMethodId, {
-        customer: customerId,
-      });
-
-      return true;
-    } catch (error) {
-      throw new AppError(`Payment method attachment failed: ${error.message}`, 500, 'STRIPE_PAYMENT_METHOD_ATTACH_FAILED');
-    }
-  }
-
-  // Detach payment method
-  async detachPaymentMethod(paymentMethodId) {
-    this._checkStripeEnabled();
-
-    try {
-      await this.stripe.paymentMethods.detach(paymentMethodId);
-      return true;
-    } catch (error) {
-      throw new AppError(`Payment method detachment failed: ${error.message}`, 500, 'STRIPE_PAYMENT_METHOD_DETACH_FAILED');
-    }
-  }
-
-  // Get customer payment methods
-  async getCustomerPaymentMethods(customerId) {
-    this._checkStripeEnabled();
-
-    try {
-      const paymentMethods = await this.stripe.paymentMethods.list({
-        customer: customerId,
-        type: 'card',
-      });
-
-      return paymentMethods.data.map(pm => ({
-        id: pm.id,
-        brand: pm.card.brand,
-        last4: pm.card.last4,
-        exp_month: pm.card.exp_month,
-        exp_year: pm.card.exp_year
-      }));
-    } catch (error) {
-      throw new AppError(`Payment methods retrieval failed: ${error.message}`, 500, 'STRIPE_PAYMENT_METHODS_FAILED');
-    }
-  }
-
-  // Create refund
-  async createRefund(refundData) {
-    this._checkStripeEnabled();
-
-    try {
-      const refund = await this.stripe.refunds.create({
-        payment_intent: refundData.payment_intent,
-        amount: refundData.amount,
-        reason: refundData.reason || 'requested_by_customer'
-      });
-
-      return refund;
-    } catch (error) {
-      throw new AppError(`Refund creation failed: ${error.message}`, 500, 'STRIPE_REFUND_FAILED');
-    }
-  }
-
   // Handle Stripe webhooks
   async handleWebhook(req, res) {
     const sig = req.headers['stripe-signature'];
     let event;
 
-    console.log('Webhook signature:', sig);
-    console.log('Body type:', typeof req.body);
-    console.log('Body length:', req.body ? req.body.length : 'No body');
-
-    // Try both webhook secrets (snapshot and thin payloads)
     const webhookSecrets = [
-      process.env.STRIPE_WEBHOOK_SECRET, // Snapshot payload secret
-      process.env.STRIPE_WEBHOOK_SECRET_THIN, // Thin payload secret (for v2 events)
-    ].filter(Boolean); // Remove undefined values
+      process.env.STRIPE_WEBHOOK_SECRET,
+      process.env.STRIPE_WEBHOOK_SECRET_THIN,
+    ].filter(Boolean);
 
     if (webhookSecrets.length === 0) {
       console.error('No webhook secrets configured');
@@ -269,16 +113,15 @@ class StripeService {
     for (const secret of webhookSecrets) {
       try {
         event = this.stripe.webhooks.constructEvent(req.body, sig, secret);
-        console.log('Webhook event type:', event.type, 'verified with secret');
-        break; // Successfully verified
+        break;
       } catch (err) {
         lastError = err;
-        continue; // Try next secret
+        continue;
       }
     }
 
     if (!event) {
-      console.error('Webhook signature verification failed with all secrets:', lastError?.message);
+      console.error('Webhook signature verification failed:', lastError?.message);
       return res.status(400).send(`Webhook Error: ${lastError?.message || 'Signature verification failed'}`);
     }
 
@@ -286,60 +129,20 @@ class StripeService {
       switch (event.type) {
         case 'account.updated':
         case 'connect.account.updated':
-          // Standard payload - account object is in event.data.object
           await this.handleAccountUpdated(event.data.object);
           break;
-        case 'v2.core.account.updated': // Stripe Connect v2 event (thin payload)
-          // Thin payload only contains account ID - need to fetch full account
-          const accountId = event.data.object.id;
-          console.log('📥 Thin payload received for account:', accountId);
-          try {
-            // Fetch full account details from Stripe
-            const fullAccount = await this.stripe.accounts.retrieve(accountId);
-            console.log('✅ Fetched full account details:', {
-              id: fullAccount.id,
-              charges_enabled: fullAccount.charges_enabled,
-              payouts_enabled: fullAccount.payouts_enabled,
-              details_submitted: fullAccount.details_submitted,
-            });
-            await this.handleAccountUpdated(fullAccount);
-          } catch (fetchError) {
-            console.error('❌ Failed to fetch account details:', fetchError);
-            // Still try to handle with what we have
-            await this.handleAccountUpdated(event.data.object);
-          }
-          break;
         case 'checkout.session.completed':
-          console.log('💳 Checkout session completed:', event.data.object.id);
           await this._handleCheckoutSessionCompleted(event.data.object);
           break;
         case 'payment_intent.succeeded':
-          console.log('💳 Payment intent succeeded:', event.data.object.id);
           await this._handlePaymentIntentSucceeded(event.data.object);
           break;
         case 'payment_intent.payment_failed':
-          console.log('💳 Payment intent failed:', event.data.object.id);
           await this._handlePaymentIntentFailed(event.data.object);
-          break;
-        case 'customer.subscription.created':
-          await this.handleSubscriptionCreated(event.data.object);
-          break;
-        case 'customer.subscription.updated':
-          await this.handleSubscriptionUpdated(event.data.object);
-          break;
-        case 'customer.subscription.deleted':
-          await this.handleSubscriptionDeleted(event.data.object);
-          break;
-        case 'invoice.payment_succeeded':
-          await this.handleInvoicePaymentSucceeded(event.data.object);
-          break;
-        case 'invoice.payment_failed':
-          await this.handleInvoicePaymentFailed(event.data.object);
           break;
         default:
           console.log(`Unhandled event type: ${event.type}`);
       }
-
       res.json({ received: true });
     } catch (error) {
       console.error('Webhook handler error:', error);
@@ -349,329 +152,19 @@ class StripeService {
 
   // Handle Stripe Connect account updates
   async handleAccountUpdated(account) {
-    const { supabaseAdmin } = require('../config/database');
-    
     try {
-      console.log('Processing account update for:', account.id);
-      console.log('Account details:', {
-        charges_enabled: account.charges_enabled,
-        payouts_enabled: account.payouts_enabled,
-        details_submitted: account.details_submitted,
-        requirements: account.requirements
-      });
-
-      // Determine account status
-      // Account is active if charges and payouts are enabled
-      // But if details_submitted is true, onboarding is complete even if not fully active yet
       const isActive = account.charges_enabled && account.payouts_enabled;
       const status = isActive ? 'active' : 'pending';
       const onboardingCompleted = account.details_submitted === true;
 
-      console.log('📊 Account status update:', {
-        account_id: account.id,
-        charges_enabled: account.charges_enabled,
-        payouts_enabled: account.payouts_enabled,
-        details_submitted: account.details_submitted,
-        onboarding_completed: onboardingCompleted,
-        status: status,
-      });
-
-      // Update stripe_accounts table
-      const { error: accountsError } = await supabaseAdmin
-        .from('stripe_accounts')
-        .update({
-          account_status: status,
-          onboarding_completed: onboardingCompleted,
-          charges_enabled: account.charges_enabled || false,
-          payouts_enabled: account.payouts_enabled || false,
-          details_submitted: account.details_submitted || false,
-          capabilities: account.capabilities || {},
-          requirements: account.requirements || {},
-          updated_at: new Date().toISOString()
-        })
-        .eq('stripe_account_id', account.id);
-
-      if (accountsError) {
-        console.error('Failed to update Stripe account status:', accountsError);
-      } else {
-        console.log('✅ Updated stripe_accounts table');
-      }
-
-      // Also update salons table
-      const { error: salonsError } = await supabaseAdmin
-        .from('salons')
-        .update({
-          stripe_account_status: status,
-          updated_at: new Date().toISOString()
-        })
-        .eq('stripe_account_id', account.id);
-
-      if (salonsError) {
-        console.error('Failed to update salon Stripe status:', salonsError);
-      } else {
-        console.log('✅ Updated salons table');
-      }
+      await supabaseAdmin.from('salons').update({
+        stripe_account_status: status,
+        updated_at: new Date().toISOString()
+      }).eq('stripe_account_id', account.id);
 
       console.log(`🎉 Updated Stripe account ${account.id} status: ${status}`);
     } catch (error) {
-      console.error('Error handling account update webhook:', error);
-    }
-  }
-
-  // Handle subscription created
-  async handleSubscriptionCreated(subscription) {
-    const { supabase } = require('../config/database');
-    
-    try {
-      // Update salon subscription status
-      const { error } = await supabase
-        .from('salons')
-        .update({
-          subscription_plan: 'plus',
-          subscription_status: subscription.status,
-          stripe_subscription_id: subscription.id,
-          trial_ends_at: subscription.trial_end ? new Date(subscription.trial_end * 1000).toISOString() : null,
-          subscription_ends_at: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null
-        })
-        .eq('stripe_customer_id', subscription.customer);
-
-      if (error) {
-        console.error('Failed to update subscription status:', error);
-      }
-    } catch (error) {
-      console.error('Error handling subscription created webhook:', error);
-    }
-  }
-
-  // Handle subscription updated
-  async handleSubscriptionUpdated(subscription) {
-    const { supabase } = require('../config/database');
-    
-    try {
-      const { error } = await supabase
-        .from('salons')
-        .update({
-          subscription_status: subscription.status,
-          subscription_ends_at: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
-          trial_ends_at: subscription.trial_end ? new Date(subscription.trial_end * 1000).toISOString() : null
-        })
-        .eq('stripe_subscription_id', subscription.id);
-
-      if (error) {
-        console.error('Failed to update subscription status:', error);
-      }
-    } catch (error) {
-      console.error('Error handling subscription updated webhook:', error);
-    }
-  }
-
-  // Handle subscription deleted/cancelled
-  async handleSubscriptionDeleted(subscription) {
-    const { supabase } = require('../config/database');
-    
-    try {
-      const { error } = await supabase
-        .from('salons')
-        .update({
-          subscription_plan: 'basic',
-          subscription_status: 'cancelled',
-          subscription_ends_at: new Date().toISOString()
-        })
-        .eq('stripe_subscription_id', subscription.id);
-
-      if (error) {
-        console.error('Failed to update subscription cancellation:', error);
-      }
-    } catch (error) {
-      console.error('Error handling subscription deleted webhook:', error);
-    }
-  }
-
-  // Handle successful invoice payment
-  async handleInvoicePaymentSucceeded(invoice) {
-    const { supabase } = require('../config/database');
-    
-    try {
-      if (invoice.subscription) {
-        const { error } = await supabase
-          .from('salons')
-          .update({
-            subscription_status: 'active',
-            last_payment_date: new Date().toISOString()
-          })
-          .eq('stripe_subscription_id', invoice.subscription);
-
-        if (error) {
-          console.error('Failed to update subscription payment:', error);
-        }
-      }
-    } catch (error) {
-      console.error('Error handling invoice payment success webhook:', error);
-    }
-  }
-
-  // Handle failed invoice payment
-  async handleInvoicePaymentFailed(invoice) {
-    const { supabase } = require('../config/database');
-    
-    try {
-      if (invoice.subscription) {
-        const { error } = await supabase
-          .from('salons')
-          .update({
-            subscription_status: 'past_due'
-          })
-          .eq('stripe_subscription_id', invoice.subscription);
-
-        if (error) {
-          console.error('Failed to update subscription payment failure:', error);
-        }
-      }
-    } catch (error) {
-      console.error('Error handling invoice payment failure webhook:', error);
-    }
-  }
-
-  // Get account dashboard link
-  async createDashboardLink(accountId) {
-    this._checkStripeEnabled();
-
-    try {
-      const link = await this.stripe.accounts.createLoginLink(accountId);
-      return link;
-    } catch (error) {
-      throw new AppError(`Dashboard link creation failed: ${error.message}`, 500, 'STRIPE_DASHBOARD_LINK_FAILED');
-    }
-  }
-
-  // ==================== SUBSCRIPTION MANAGEMENT ====================
-
-  // Create subscription for salon owner premium plan
-  async createSubscription(customerId, priceId, trialDays = config.subscription.trial_days) {
-    this._checkStripeEnabled();
-
-    try {
-      const subscription = await this.stripe.subscriptions.create({
-        customer: customerId,
-        items: [{ price: priceId }],
-        trial_period_days: trialDays,
-        payment_behavior: 'default_incomplete',
-        payment_settings: { save_default_payment_method: 'on_subscription' },
-        expand: ['latest_invoice.payment_intent'],
-      });
-
-      return subscription;
-    } catch (error) {
-      throw new AppError(`Subscription creation failed: ${error.message}`, 500, 'STRIPE_SUBSCRIPTION_FAILED');
-    }
-  }
-
-  // Cancel subscription
-  async cancelSubscription(subscriptionId, cancelAtPeriodEnd = true) {
-    this._checkStripeEnabled();
-
-    try {
-      const subscription = await this.stripe.subscriptions.update(subscriptionId, {
-        cancel_at_period_end: cancelAtPeriodEnd,
-      });
-
-      if (!cancelAtPeriodEnd) {
-        await this.stripe.subscriptions.cancel(subscriptionId);
-      }
-
-      return subscription;
-    } catch (error) {
-      throw new AppError(`Subscription cancellation failed: ${error.message}`, 500, 'STRIPE_SUBSCRIPTION_CANCEL_FAILED');
-    }
-  }
-
-  // Get subscription status
-  async getSubscription(subscriptionId) {
-    this._checkStripeEnabled();
-
-    try {
-      const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
-      return subscription;
-    } catch (error) {
-      throw new AppError(`Subscription retrieval failed: ${error.message}`, 500, 'STRIPE_SUBSCRIPTION_RETRIEVAL_FAILED');
-    }
-  }
-
-  // Update subscription
-  async updateSubscription(subscriptionId, updates) {
-    this._checkStripeEnabled();
-
-    try {
-      const subscription = await this.stripe.subscriptions.update(subscriptionId, updates);
-      return subscription;
-    } catch (error) {
-      throw new AppError(`Subscription update failed: ${error.message}`, 500, 'STRIPE_SUBSCRIPTION_UPDATE_FAILED');
-    }
-  }
-
-  // Create billing portal session
-  async createBillingPortalSession(customerId, returnUrl) {
-    this._checkStripeEnabled();
-
-    try {
-      const session = await this.stripe.billingPortal.sessions.create({
-        customer: customerId,
-        return_url: returnUrl,
-      });
-
-      return session;
-    } catch (error) {
-      throw new AppError(`Billing portal creation failed: ${error.message}`, 500, 'STRIPE_BILLING_PORTAL_FAILED');
-    }
-  }
-
-  // Create checkout session for salon's connected account (payment link)
-  // Creates session on platform, transfers payment to connected account
-  async createCheckoutSession(paymentData) {
-    this._checkStripeEnabled();
-
-    try {
-      // Create checkout session on platform account, with transfer to connected account
-      const session = await this.stripe.checkout.sessions.create({
-        payment_method_types: ['card'],
-        mode: 'payment',
-        line_items: [{
-          price_data: {
-            currency: paymentData.currency || 'eur',
-            product_data: {
-              name: paymentData.productName || 'Booking Payment',
-              description: paymentData.description || `Payment for booking ${paymentData.bookingId}`,
-            },
-            unit_amount: Math.round(paymentData.amount * 100), // Convert to cents
-          },
-          quantity: 1,
-        }],
-        success_url: paymentData.successUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: paymentData.cancelUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-cancel`,
-        payment_intent_data: {
-          application_fee_amount: 0, // No platform fee
-          transfer_data: {
-            destination: paymentData.connectedAccountId, // Salon's connected account
-          },
-          on_behalf_of: paymentData.connectedAccountId,
-        },
-        metadata: paymentData.metadata || {},
-      });
-
-      return session;
-    } catch (error) {
-      throw new AppError(`Checkout session creation failed: ${error.message}`, 500, 'STRIPE_CHECKOUT_FAILED');
-    }
-  }
-
-  // Construct webhook event for verification (used by payment controller)
-  constructWebhookEvent(payload, signature, endpointSecret) {
-    this._checkStripeEnabled();
-
-    try {
-      return this.stripe.webhooks.constructEvent(payload, signature, endpointSecret);
-    } catch (error) {
-      throw new AppError(`Webhook signature verification failed: ${error.message}`, 400, 'WEBHOOK_VERIFICATION_FAILED');
+      console.error('Error handling account update:', error);
     }
   }
 
@@ -679,107 +172,94 @@ class StripeService {
    * Handle successful checkout session
    */
   async _handleCheckoutSessionCompleted(session) {
-    const { supabaseAdmin } = require('../config/database');
     console.log(`💳 Processing checkout session: ${session.id}`);
-    
     const bookingId = session.metadata?.booking_id;
-    if (!bookingId) {
-      console.error('❌ CRITICAL: No booking_id found in metadata for session:', session.id);
-      return;
-    }
+    if (!bookingId) return;
 
     try {
-      // 1. Get actual payment method details
       let paymentMethod = 'online';
       if (session.payment_intent) {
-        try {
-          const pi = await this.stripe.paymentIntents.retrieve(session.payment_intent);
-          if (pi.payment_method) {
-            const pm = await this.stripe.paymentMethods.retrieve(pi.payment_method);
-            paymentMethod = pm.card?.wallet?.type || pm.type || 'card';
-          }
-        } catch (err) {
-          console.log('⚠️ Could not fetch detailed PM info:', err.message);
-          paymentMethod = session.payment_method_types?.[0] || 'online';
+        const pi = await this.stripe.paymentIntents.retrieve(session.payment_intent);
+        if (pi.payment_method) {
+          const pm = await this.stripe.paymentMethods.retrieve(pi.payment_method);
+          paymentMethod = pm.card?.wallet?.type || pm.type || 'card';
         }
       }
 
-      console.log(`💳 Updating DB for booking ${bookingId} with method: ${paymentMethod}`);
+      await supabaseAdmin.from('payments').update({
+        status: 'completed',
+        stripe_payment_intent_id: session.payment_intent,
+        payment_method: paymentMethod,
+      }).eq('booking_id', bookingId);
 
-      // 2. Update Payment record (Aggressive update)
-      const { data: updatedPayment, error: paymentError } = await supabaseAdmin
-        .from('payments')
-        .update({
-          status: 'completed',
-          stripe_payment_intent_id: session.payment_intent,
-          payment_method: paymentMethod,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('booking_id', bookingId);
-
-      if (paymentError) console.error('❌ Error updating payment table:', paymentError);
-
-      // 3. Update Booking record
-      const { error: bookingError } = await supabaseAdmin
-        .from('bookings')
-        .update({
-          status: 'confirmed',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', bookingId);
-
-      if (bookingError) console.error('❌ Error updating booking table:', bookingError);
+      await supabaseAdmin.from('bookings').update({
+        status: 'confirmed',
+      }).eq('id', bookingId);
 
       console.log(`✅ Webhook sync complete for booking: ${bookingId}`);
     } catch (error) {
-      console.error('❌ Fatal error in webhook handler:', error);
+      console.error('❌ Error in checkout session handler:', error);
     }
   }
 
-  /**
-   * Handle successful payment intent
-   */
   async _handlePaymentIntentSucceeded(paymentIntent) {
-    const { supabaseAdmin } = require('../config/database');
     console.log(`💳 Processing payment intent: ${paymentIntent.id}`);
+    const bookingId = paymentIntent.metadata?.booking_id;
+    if (!bookingId) return;
 
     try {
-      await supabaseAdmin
-        .from('payments')
-        .update({
-          status: 'completed',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('stripe_payment_intent_id', paymentIntent.id);
-
+      await supabaseAdmin.from('payments').update({
+        status: 'completed',
+      }).eq('stripe_payment_intent_id', paymentIntent.id);
       console.log(`✅ Payment updated to completed via payment_intent`);
     } catch (error) {
-      console.error('❌ Error handling payment intent:', error);
+      console.error('❌ Error in payment intent handler:', error);
     }
   }
 
-  /**
-   * Handle failed payment intent
-   */
   async _handlePaymentIntentFailed(paymentIntent) {
-    const { supabaseAdmin } = require('../config/database');
-    console.log(`💳 Processing failed payment: ${paymentIntent.id}`);
-
+    const bookingId = paymentIntent.metadata?.booking_id;
+    if (!bookingId) return;
     try {
-      await supabaseAdmin
-        .from('payments')
-        .update({
-          status: 'failed',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('stripe_payment_intent_id', paymentIntent.id);
-
-      console.log(`✅ Payment updated to failed`);
+      await supabaseAdmin.from('payments').update({
+        status: 'failed',
+      }).eq('stripe_payment_intent_id', paymentIntent.id);
     } catch (error) {
-      console.error('❌ Error handling failed payment:', error);
+      console.error('❌ Error in payment fail handler:', error);
+    }
+  }
+
+  // Create checkout session
+  async createCheckoutSession(paymentData) {
+    this._checkStripeEnabled();
+    try {
+      return await this.stripe.checkout.sessions.create({
+        payment_method_types: ['card', 'ideal'],
+        mode: 'payment',
+        line_items: [{
+          price_data: {
+            currency: 'eur',
+            product_data: {
+              name: 'Booking Payment',
+              description: `Payment for booking ${paymentData.bookingId}`,
+            },
+            unit_amount: Math.round(paymentData.amount * 100),
+          },
+          quantity: 1,
+        }],
+        success_url: `${process.env.FRONTEND_URL || 'https://www.salontime.nl'}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.FRONTEND_URL || 'https://www.salontime.nl'}/payment-cancel`,
+        payment_intent_data: {
+          application_fee_amount: Math.round(paymentData.amount * 5), // 5% fee
+          transfer_data: { destination: paymentData.connectedAccountId },
+          metadata: { booking_id: paymentData.bookingId }
+        },
+        metadata: { booking_id: paymentData.bookingId },
+      });
+    } catch (error) {
+      throw new AppError(`Checkout session creation failed: ${error.message}`, 500, 'STRIPE_CHECKOUT_FAILED');
     }
   }
 }
 
 module.exports = new StripeService();
-
