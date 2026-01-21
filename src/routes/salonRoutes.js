@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const salonController = require('../controllers/salonController');
 const { authenticateToken } = require('../middleware/auth');
+const { salonImageUpload } = require('../middleware/upload');
 
 // Public routes
 router.get('/nearby', salonController.getNearbySalons);
@@ -25,7 +26,12 @@ router.get('/clients', salonController.getSalonClients);
 // Stripe Connect routes
 router.post('/stripe/account', salonController.createStripeAccount);
 router.get('/stripe/onboarding-link', salonController.generateStripeOnboardingLink);
+router.get('/stripe/check-status', salonController.checkStripeAccountStatus);
 router.get('/stripe/dashboard-link', salonController.getStripeDashboardLink);
+
+// Salon image routes
+router.post('/images', salonImageUpload, salonController.uploadSalonImage);
+router.delete('/images', salonController.deleteSalonImage);
 
 module.exports = router;
 

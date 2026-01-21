@@ -186,6 +186,112 @@ class SupabaseService {
     return urlData.publicUrl;
   }
 
+  // Upload salon image to salons_assets bucket
+  async uploadSalonImage(userId, fileBuffer, mimeType, originalFileName, imageIndex = 0) {
+    const bucketName = 'salons_assets'; // Use salons_assets bucket
+
+    // Get file extension from mime type
+    const extMap = {
+      'image/jpeg': 'jpg',
+      'image/jpg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'image/gif': 'gif'
+    };
+    const ext = extMap[mimeType] || 'jpg';
+
+    // Create file path: {user_id}/image_{index}.{ext}
+    const filePath = `${userId}/image_${imageIndex}.${ext}`;
+
+    // Upload image
+    const { data, error } = await supabaseAdmin.storage
+      .from(bucketName)
+      .upload(filePath, fileBuffer, {
+        contentType: mimeType,
+        upsert: true,
+        cacheControl: '3600'
+      });
+
+    if (error) {
+      console.error('Error uploading salon image:', error);
+      throw new AppError('Failed to upload salon image', 500, 'SALON_IMAGE_UPLOAD_FAILED');
+    }
+
+    // Get public URL
+    const { data: urlData } = supabaseAdmin.storage
+      .from(bucketName)
+      .getPublicUrl(filePath);
+
+    return urlData.publicUrl;
+  }
+
+  // Get all salon images for a user
+  async getSalonImages(userId) {
+    const bucketName = 'salons_assets';
+    
+    try {
+      const { data: files, error } = await supabaseAdmin.storage
+        .from(bucketName)
+        .list(userId);
+
+      if (error) {
+        console.error('Error listing salon images:', error);
+        return [];
+      }
+
+      if (!files || files.length === 0) {
+        return [];
+      }
+
+      // Get public URLs for all images
+      const imageUrls = files.map((file) => {
+        const { data: urlData } = supabaseAdmin.storage
+          .from(bucketName)
+          .getPublicUrl(`${userId}/${file.name}`);
+        return urlData.publicUrl;
+      });
+
+      return imageUrls;
+    } catch (error) {
+      console.error('Error getting salon images:', error);
+      return [];
+    }
+  }
+
+  // Delete salon image
+  async deleteSalonImage(userId, imageUrl) {
+    const bucketName = 'salons_assets';
+    
+    try {
+      // Extract file path from URL
+      const urlParts = imageUrl.split('/');
+      const fileNameIndex = urlParts.findIndex(part => part === userId);
+      if (fileNameIndex === -1 || fileNameIndex === urlParts.length - 1) {
+        throw new AppError('Invalid image URL', 400, 'INVALID_IMAGE_URL');
+      }
+      
+      const fileName = urlParts.slice(fileNameIndex + 1).join('/');
+      const filePath = `${userId}/${fileName}`;
+
+      const { error } = await supabaseAdmin.storage
+        .from(bucketName)
+        .remove([filePath]);
+
+      if (error) {
+        console.error('Error deleting salon image:', error);
+        throw new AppError('Failed to delete salon image', 500, 'SALON_IMAGE_DELETE_FAILED');
+      }
+
+      return true;
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      console.error('Error in deleteSalonImage:', error);
+      throw new AppError('Failed to delete salon image', 500, 'SALON_IMAGE_DELETE_FAILED');
+    }
+  }
+
   // Delete all user avatars from storage
   async deleteUserAvatars(userId) {
     const config = require('../config');

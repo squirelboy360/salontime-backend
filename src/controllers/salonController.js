@@ -1,6 +1,8 @@
 const { supabase, supabaseAdmin } = require('../config/database');
 const stripeService = require('../services/stripeService');
+const supabaseService = require('../services/supabaseService');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
+const config = require('../config');
 
 class SalonController {
   // Create salon profile
@@ -257,27 +259,38 @@ class SalonController {
       description,
       address,
       city,
+      state,
       zip_code,
       phone,
       email,
       website,
-      business_hours
+      business_hours,
+      amenities,
+      images
     } = req.body;
 
     try {
-      const { data: salon, error } = await supabase
+      const updateData = {
+        business_name,
+        description,
+        address,
+        city,
+        zip_code,
+        phone,
+        email,
+        website,
+        business_hours,
+        updated_at: new Date().toISOString()
+      };
+
+      // Add optional fields if provided
+      if (state !== undefined) updateData.state = state;
+      if (amenities !== undefined) updateData.amenities = amenities;
+      if (images !== undefined) updateData.images = images;
+
+      const { data: salon, error } = await supabaseAdmin
         .from('salons')
-        .update({
-          business_name,
-          description,
-          address,
-          city,
-          zip_code,
-          phone,
-          email,
-          website,
-          business_hours
-        })
+        .update(updateData)
         .eq('owner_id', req.user.id)
         .select()
         .single();
@@ -944,6 +957,82 @@ class SalonController {
     }
   });
 
+  // Check and sync Stripe account status
+  checkStripeAccountStatus = asyncHandler(async (req, res) => {
+    try {
+      // Get user's salon
+      const { data: salon, error: salonError } = await supabaseAdmin
+        .from('salons')
+        .select('*')
+        .eq('owner_id', req.user.id)
+        .single();
+
+      if (salonError || !salon) {
+        throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
+      }
+
+      if (!salon.stripe_account_id) {
+        throw new AppError('Stripe account not found for this salon', 404, 'STRIPE_ACCOUNT_NOT_FOUND');
+      }
+
+      // Get actual account status from Stripe
+      const accountStatus = await stripeService.getAccountStatus(salon.stripe_account_id);
+
+      // Determine status
+      const isActive = accountStatus.charges_enabled && accountStatus.payouts_enabled;
+      const status = isActive ? 'active' : 'pending';
+
+      // Update salons table
+      await supabaseAdmin
+        .from('salons')
+        .update({
+          stripe_account_status: status,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', salon.id);
+
+      // Update stripe_accounts table
+      await supabaseAdmin
+        .from('stripe_accounts')
+        .update({
+          account_status: status,
+          charges_enabled: accountStatus.charges_enabled,
+          payouts_enabled: accountStatus.payouts_enabled,
+          onboarding_completed: accountStatus.details_submitted,
+          capabilities: accountStatus.capabilities,
+          requirements: accountStatus.requirements,
+          updated_at: new Date().toISOString()
+        })
+        .eq('stripe_account_id', salon.stripe_account_id);
+
+      // Get updated salon data
+      const { data: updatedSalon } = await supabaseAdmin
+        .from('salons')
+        .select('*')
+        .eq('id', salon.id)
+        .single();
+
+      res.status(200).json({
+        success: true,
+        data: {
+          salon: updatedSalon,
+          account_status: {
+            status,
+            details_submitted: accountStatus.details_submitted,
+            charges_enabled: accountStatus.charges_enabled,
+            payouts_enabled: accountStatus.payouts_enabled,
+          }
+        }
+      });
+
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError(`Failed to check Stripe account status: ${error.message}`, 500, 'STRIPE_STATUS_CHECK_FAILED');
+    }
+  });
+
   // Get Stripe dashboard link
   getStripeDashboardLink = asyncHandler(async (req, res) => {
     try {
@@ -1312,6 +1401,139 @@ class SalonController {
           personalized: false
         });
       }
+    }
+  });
+
+  // Upload salon image
+  uploadSalonImage = asyncHandler(async (req, res) => {
+    if (!req.file) {
+      throw new AppError('No file uploaded', 400, 'NO_FILE_UPLOADED');
+    }
+
+    const userId = req.user.id;
+    const fileBuffer = req.file.buffer;
+    const mimeType = req.file.mimetype;
+    const imageIndex = parseInt(req.body.index) || 0;
+
+    // Validate file type
+    if (!config.upload.allowed_avatar_types.includes(mimeType)) {
+      throw new AppError(
+        `Invalid file type. Allowed types: ${config.upload.allowed_avatar_types.join(', ')}`,
+        400,
+        'INVALID_FILE_TYPE'
+      );
+    }
+
+    // Validate file size
+    if (fileBuffer.length > config.upload.max_avatar_size) {
+      throw new AppError(
+        `File too large. Maximum size: ${config.upload.max_avatar_size / 1024 / 1024}MB`,
+        400,
+        'FILE_TOO_LARGE'
+      );
+    }
+
+    try {
+      // Get user's salon to ensure they have one
+      const { data: salon } = await supabaseAdmin
+        .from('salons')
+        .select('id, images')
+        .eq('owner_id', userId)
+        .single();
+
+      if (!salon) {
+        throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
+      }
+
+      // Upload to Supabase Storage (salons_assets bucket)
+      const imageUrl = await supabaseService.uploadSalonImage(userId, fileBuffer, mimeType, req.file.originalname, imageIndex);
+
+      // Update salon images array
+      const currentImages = Array.isArray(salon.images) ? salon.images : [];
+      const updatedImages = [...currentImages];
+      
+      // Replace or add image at index
+      if (imageIndex < updatedImages.length) {
+        updatedImages[imageIndex] = imageUrl;
+      } else {
+        updatedImages.push(imageUrl);
+      }
+
+      // Update salon with new image URL
+      await supabaseAdmin
+        .from('salons')
+        .update({
+          images: updatedImages,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', salon.id);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          image_url: imageUrl,
+          images: updatedImages
+        }
+      });
+
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError('Failed to upload salon image', 500, 'SALON_IMAGE_UPLOAD_FAILED');
+    }
+  });
+
+  // Delete salon image
+  deleteSalonImage = asyncHandler(async (req, res) => {
+    const { imageUrl } = req.body;
+
+    if (!imageUrl) {
+      throw new AppError('Image URL is required', 400, 'MISSING_IMAGE_URL');
+    }
+
+    const userId = req.user.id;
+
+    try {
+      // Get user's salon
+      const { data: salon } = await supabaseAdmin
+        .from('salons')
+        .select('id, images')
+        .eq('owner_id', userId)
+        .single();
+
+      if (!salon) {
+        throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
+      }
+
+      // Delete from storage
+      await supabaseService.deleteSalonImage(userId, imageUrl);
+
+      // Update salon images array (remove the deleted image)
+      const currentImages = Array.isArray(salon.images) ? salon.images : [];
+      const updatedImages = currentImages.filter(img => img !== imageUrl);
+
+      // Update salon
+      await supabaseAdmin
+        .from('salons')
+        .update({
+          images: updatedImages,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', salon.id);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          images: updatedImages
+        }
+      });
+
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError('Failed to delete salon image', 500, 'SALON_IMAGE_DELETE_FAILED');
     }
   });
 }

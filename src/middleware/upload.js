@@ -36,7 +36,18 @@ const avatarUpload = multer({
   fileFilter: fileFilter
 });
 
+// File filter for salon image uploads (same as avatar)
+const salonImageUpload = multer({
+  storage: storage,
+  limits: {
+    fileSize: config.upload.max_avatar_size // Use same size limit
+  },
+  fileFilter: fileFilter
+});
+
 module.exports = {
-  avatarUpload: avatarUpload.single('avatar')
+  avatarUpload: avatarUpload.single('avatar'),
+  salonImageUpload: salonImageUpload.single('image'), // For single image
+  salonImagesUpload: salonImageUpload.array('images', 10) // For multiple images (max 10)
 };
 
