@@ -1436,12 +1436,12 @@ class BookingController {
   });
 
   /**
-   * Create Stripe payment intent for client to pay
+   * Create Stripe Checkout Session for client to pay
    */
   createPaymentIntent = asyncHandler(async (req, res) => {
     try {
       const { bookingId } = req.params;
-      console.log(`💳 Creating payment intent for booking: ${bookingId}`);
+      console.log(`💳 Creating checkout session for booking: ${bookingId}`);
 
       // Get booking with payment details
       const { data: booking, error: bookingError } = await supabaseAdmin
@@ -1463,7 +1463,7 @@ class BookingController {
         throw new AppError('Unauthorized', 403, 'UNAUTHORIZED');
       }
 
-      // Get or create payment record
+      // Get payment record
       let payment = await supabaseAdmin
         .from('payments')
         .select('*')
@@ -1482,41 +1482,60 @@ class BookingController {
         throw new AppError('Salon payment not configured', 400, 'STRIPE_NOT_CONFIGURED');
       }
 
-      console.log(`💳 Creating Stripe payment intent: €${amount} for salon: ${stripeAccountId}`);
+      console.log(`💳 Creating Stripe checkout session: €${amount} for salon: ${stripeAccountId}`);
 
-      // Create Stripe payment intent
+      // Create Stripe Checkout Session
       const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(amount * 100), // Convert to cents
-        currency: 'eur',
-        payment_method_types: ['ideal', 'card'],
-        application_fee_amount: Math.round(amount * 100 * 0.05), // 5% platform fee
-        transfer_data: {
-          destination: stripeAccountId,
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card', 'ideal'],
+        line_items: [{
+          price_data: {
+            currency: 'eur',
+            product_data: {
+              name: booking.services.name,
+              description: `Booking at ${booking.salons.business_name}`,
+            },
+            unit_amount: Math.round(amount * 100), // Convert to cents
+          },
+          quantity: 1,
+        }],
+        mode: 'payment',
+        success_url: `${process.env.FRONTEND_URL || 'https://salontime.nl'}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.FRONTEND_URL || 'https://salontime.nl'}/payment-cancelled`,
+        payment_intent_data: {
+          application_fee_amount: Math.round(amount * 100 * 0.05), // 5% platform fee
+          transfer_data: {
+            destination: stripeAccountId,
+          },
+          metadata: {
+            booking_id: bookingId,
+            salon_name: booking.salons.business_name,
+            service_name: booking.services.name,
+          },
         },
         metadata: {
           booking_id: bookingId,
-          salon_name: booking.salons.business_name,
-          service_name: booking.services.name,
+          payment_id: paymentRecord.id,
         },
       });
 
-      // Update payment record with payment intent ID
+      // Update payment record with session ID
       await supabaseAdmin
         .from('payments')
         .update({
-          stripe_payment_intent_id: paymentIntent.id,
+          stripe_payment_intent_id: session.id,
           updated_at: new Date().toISOString(),
         })
         .eq('id', paymentRecord.id);
 
-      console.log(`✅ Payment intent created: ${paymentIntent.id}`);
+      console.log(`✅ Checkout session created: ${session.id}`);
+      console.log(`💳 Checkout URL: ${session.url}`);
 
       res.status(200).json({
         success: true,
         data: {
-          clientSecret: paymentIntent.client_secret,
-          publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+          checkoutUrl: session.url,
+          sessionId: session.id,
           amount: amount,
           currency: 'eur',
         }
@@ -1526,8 +1545,8 @@ class BookingController {
       if (error instanceof AppError) {
         throw error;
       }
-      console.error('Error creating payment intent:', error);
-      throw new AppError('Failed to create payment intent', 500, 'PAYMENT_INTENT_FAILED');
+      console.error('Error creating checkout session:', error);
+      throw new AppError('Failed to create checkout session', 500, 'CHECKOUT_SESSION_FAILED');
     }
   });
 }
