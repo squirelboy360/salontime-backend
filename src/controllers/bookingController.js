@@ -1225,31 +1225,40 @@ class BookingController {
     console.log(`💵 markAsPaidCash called for booking: ${bookingId}`);
 
     try {
-      // Get booking to verify ownership
+      // Step 1: Get booking
       const { data: booking, error: bookingError } = await supabaseAdmin
         .from('bookings')
-        .select(`
-          *,
-          salons!bookings_salon_id_fkey(owner_id)
-        `)
+        .select('*')
         .eq('id', bookingId)
         .single();
 
-      console.log(`💵 Booking query result:`, { booking: booking?.id, error: bookingError });
+      console.log(`💵 Step 1 - Booking query result:`, { found: !!booking, error: bookingError });
 
-      if (bookingError) {
-        console.error('❌ Booking query error:', bookingError);
+      if (bookingError || !booking) {
+        console.error('❌ Booking not found:', bookingError);
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
       }
 
-      if (!booking) {
-        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+      // Step 2: Get salon to verify ownership
+      const { data: salon, error: salonError } = await supabaseAdmin
+        .from('salons')
+        .select('owner_id')
+        .eq('id', booking.salon_id)
+        .single();
+
+      console.log(`💵 Step 2 - Salon query result:`, { found: !!salon, error: salonError });
+
+      if (salonError || !salon) {
+        throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
       }
 
       // Verify the user owns the salon
-      if (booking.salons.owner_id !== req.user.id) {
+      if (salon.owner_id !== req.user.id) {
+        console.log(`❌ Unauthorized: salon owner=${salon.owner_id}, user=${req.user.id}`);
         throw new AppError('Unauthorized', 403, 'UNAUTHORIZED');
       }
+
+      console.log(`✅ Authorization passed for cash payment`);
 
       console.log(`💵 Marking booking ${bookingId} as paid cash`);
 
@@ -1317,37 +1326,45 @@ class BookingController {
     console.log(`💳 sendPaymentRequest called for booking: ${bookingId}, amount: ${amount}`);
 
     try {
-      // Get booking to verify ownership and get client info
+      // Step 1: Get booking
       const { data: booking, error: bookingError } = await supabaseAdmin
         .from('bookings')
-        .select(`
-          *,
-          salons!bookings_salon_id_fkey(owner_id, business_name, stripe_account_id),
-          user_profiles!bookings_client_id_fkey(id, first_name, email)
-        `)
+        .select('*')
         .eq('id', bookingId)
         .single();
 
-      console.log(`💳 Booking query result:`, { booking: booking?.id, error: bookingError });
+      console.log(`💳 Step 1 - Booking query result:`, { found: !!booking, error: bookingError });
 
-      if (bookingError) {
-        console.error('❌ Booking query error:', bookingError);
+      if (bookingError || !booking) {
+        console.error('❌ Booking not found:', bookingError);
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
       }
 
-      if (!booking) {
-        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+      // Step 2: Get salon to verify ownership
+      const { data: salon, error: salonError } = await supabaseAdmin
+        .from('salons')
+        .select('owner_id, business_name, stripe_account_id')
+        .eq('id', booking.salon_id)
+        .single();
+
+      console.log(`💳 Step 2 - Salon query result:`, { found: !!salon, error: salonError });
+
+      if (salonError || !salon) {
+        throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
       }
 
       // Verify the user owns the salon
-      if (booking.salons.owner_id !== req.user.id) {
+      if (salon.owner_id !== req.user.id) {
+        console.log(`❌ Unauthorized: salon owner=${salon.owner_id}, user=${req.user.id}`);
         throw new AppError('Unauthorized', 403, 'UNAUTHORIZED');
       }
 
       // Check if salon has connected Stripe account
-      if (!booking.salons.stripe_account_id) {
+      if (!salon.stripe_account_id) {
         throw new AppError('Salon has not connected Stripe account', 400, 'STRIPE_NOT_CONNECTED');
       }
+
+      console.log(`✅ Authorization passed, salon has Stripe: ${salon.stripe_account_id}`);
 
       console.log(`💳 Sending payment request for booking ${bookingId}, amount: €${amount}`);
 
