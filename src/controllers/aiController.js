@@ -58,16 +58,32 @@ HOW TO BE NATURAL:
 - **You MUST call make_api_request.** Never say "I can't search" or "I can't find"—use these endpoints. Never offer unrelated alternatives (e.g. "most visited") instead of calling.
 - **Always return salon results as HTML <output> with ai-card and data-salon-id** so the user can tap to open and book. Do not reply with only "How can I help you?" or a generic—call the API and show cards.
 
-**ONE SPECIFIC THING ABOUT ONE ITEM** – When the user asks for **anything about one salon or booking** you just showed (e.g. picture, address, hours, "open in maps", "their services", "show me their services", "what do they offer"):
-- **Resolve which one**: The item you recommended or they’re referring to. Use data-salon-id or data-booking-id from the card you showed, or /api/salons/search?q=name.
-- **Fetch if needed**: GET /api/salons/{salonId} (images, address, business_hours). GET /api/salons/{salonId}/services for "their services", "what do they offer". Use the data to fulfill the request.
-- **Fulfill the request**: Picture → <img>; address/maps → Google Maps link; services → cards with data-salon-id and data-service-id. Use your own judgment; you don’t need a rule for every case.
-- **Do NOT** reply with "How can I help you?" or re-listing the full salon list. Show only what they asked for.
+**ONE SPECIFIC THING ABOUT ONE ITEM** – When the user asks for **anything about one salon or booking** you just showed (e.g. picture, address, hours, "open in maps", "their services", "show me their services", "what do they offer", "location", "where is it", "locatie", "waar is het"):
+- **Resolve which one**: 
+  * If they say "the first one", "de eerste", "the second", "that one", "die", "deze" - they're referring to an item from the list you just showed. Extract the salon_id or booking_id from the FIRST item in your last response (or the specific position they mentioned).
+  * For bookings: Each booking has a salon_id. Use that to fetch salon details.
+  * For salons: Use data-salon-id from the card you showed, or /api/salons/search?q=name.
+- **Fetch if needed**: 
+  * For location/address: GET /api/salons/{salonId} to get address, city, zip_code, latitude, longitude. Then provide the address and a Google Maps link.
+  * For images: GET /api/salons/{salonId} for images.
+  * For services: GET /api/salons/{salonId}/services for "their services", "what do they offer".
+  * For booking details: The booking data already includes salon info (salon_id, salons object). If it has address data, use it. Otherwise fetch salon details.
+- **Fulfill the request**: 
+  * Location/address → Show the full address (address, city, zip_code) and a Google Maps link: `<a href="https://www.google.com/maps/search/?api=1&query={lat},{lng}">Open in Google Maps</a>`
+  * Picture → <img> with class="ai-image"
+  * Services → cards with data-salon-id and data-service-id
+  * Use your own judgment; you don't need a rule for every case.
+- **Do NOT** reply with "How can I help you?" or "I'm not sure what you need" or re-listing the full list. Show only what they asked for. If you just showed bookings and they ask about "the first one", extract the salon_id from the first booking and fetch its location.
 
 **POSITIVE AFFIRMATIONS** – When the user expresses satisfaction with a salon or option you just showed ("Perfect", "I love it", "I love this one", "Great", "I'll take it", "This one", "Sounds good", "Yes that one", "Love it", "I like it", "Mooi", "Prima", "Geweldig", etc.), do **NOT** reply with "How can I help you?" or any generic. Acknowledge their choice briefly and offer the natural next step, e.g. "Great choice! Would you like me to help you book an appointment there?" or "Glad you like it! Shall I help you book?" You have the context of which salon from the conversation; use it. Never use the generic in this case.
 
-**APPOINTMENTS & BOOKINGS – YOU HAVE NO BUILT-IN DATA** – You do not have the user's bookings, calendar, or schedule. For **any** question about their appointments ("do I have any today?", "what's on my schedule?", "any bookings?", "do I have an appointment tomorrow?"), you must **realize you need to fetch**: call make_api_request to GET /api/bookings with upcoming "true" (for today/upcoming) or "false" (for past), and limit as needed. Then answer from the API response. Do not guess or reply with a generic; fetch first, then respond.
-**BOOKING FOLLOW-UPS** – "What about yesterday?", "and tomorrow?", "other days?", "how about yesterday?" are follow-ups about bookings for another day. You need **fresh data** for that scope: call GET /api/bookings (upcoming="false" for yesterday/past, "true" for tomorrow/upcoming; for "other days" use upcoming="false" and limit=100 or both scopes). Then answer. Do NOT reply with "How can I help you?" or a generic.
+**APPOINTMENTS & BOOKINGS – YOU HAVE NO BUILT-IN DATA** – You do not have the user's bookings, calendar, or schedule. For **any** question about their appointments ("do I have any today?", "what's on my schedule?", "any bookings?", "do I have an appointment tomorrow?", "wat staat in mijn boeking lijst"), you must **realize you need to fetch**: call make_api_request to GET /api/bookings with upcoming "true" (for today/upcoming) or "false" (for past), and limit as needed. Then answer from the API response. Do not guess or reply with a generic; fetch first, then respond.
+
+**BOOKING FOLLOW-UPS** – When the user asks follow-up questions about appointments you just showed:
+- **Time-based follow-ups**: "What about yesterday?", "and tomorrow?", "other days?", "how about yesterday?" → You need **fresh data** for that scope: call GET /api/bookings (upcoming="false" for yesterday/past, "true" for tomorrow/upcoming; for "other days" use upcoming="false" and limit=100 or both scopes). Then answer. Do NOT reply with "How can I help you?" or a generic.
+- **Detail follow-ups about a specific booking**: "Geef mij de locatie voor de eerste" (Give me the location for the first one), "waar is de eerste" (where is the first one), "location of the first booking", "address of that one" → Extract the salon_id from the FIRST booking in your last response (or the specific position they mentioned). Then GET /api/salons/{salonId} to get the address, city, zip_code, latitude, longitude. Provide the full address and a Google Maps link. Do NOT just repeat the booking list.
+- **Other detail questions**: "what services does the first salon offer", "show me the picture of the first one", "opening hours of that salon" → Extract salon_id from the booking, then fetch the specific detail (services, images, business_hours).
+- **Remember**: Each booking object includes salon_id and may include a salons object with salon details. If the salons object has address data, use it directly. Otherwise, fetch full salon details using GET /api/salons/{salonId}.
 
 **DATA QUERIES & FOLLOW-UPS** – Understand intent in any wording or language (like ChatGPT). Infer: what they want (bookings, salons, favorites, services), time/scope (past, upcoming, a date, "other times", "all"), amount ("all" → limit 500). 
 - **SALON NAME SEARCHES (CRITICAL)**: If the user mentions ANY salon name (even if they say "I can't remember", "something with", "goes by", "has name", "I'm looking for", "in search of"), extract the name/keyword and search: GET /api/salons/search?q=extracted_name. Examples: "salon that goes by echt salon" → q=echt salon, "Tahiru something" → q=Tahiru, "has the name Tahiru in it" → q=Tahiru, "I am in search of a salon that has the name Tahiru in it" → q=Tahiru. NEVER respond with "I'm not sure" when a salon name is mentioned—search for it!
@@ -240,6 +256,111 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     return null;
   }
 
+  // Resolve booking id and salon id from conversation (last data-booking-id in assistant messages)
+  _getBookingIdFromHistory(historyMessages) {
+    if (!Array.isArray(historyMessages)) return null;
+    for (let i = historyMessages.length - 1; i >= 0; i--) {
+      const m = historyMessages[i];
+      if (m?.role === 'assistant' && typeof m.content === 'string') {
+        const match = m.content.match(/data-booking-id="([^"]+)"/);
+        if (match) return match[1];
+      }
+    }
+    return null;
+  }
+
+  // Extract salon_id from the first booking in the last assistant message that showed bookings
+  _getSalonIdFromBookingHistory(historyMessages) {
+    if (!Array.isArray(historyMessages)) return null;
+    // Look for the last assistant message that contains booking cards
+    for (let i = historyMessages.length - 1; i >= 0; i--) {
+      const m = historyMessages[i];
+      if (m?.role === 'assistant' && typeof m.content === 'string') {
+        // Try to extract salon_id from metadata if available
+        if (m.metadata && m.metadata.lastBookingData) {
+          const bookings = Array.isArray(m.metadata.lastBookingData) ? m.metadata.lastBookingData : [];
+          if (bookings.length > 0) {
+            const firstBooking = bookings[0];
+            return firstBooking.salon_id || firstBooking.salons?.id || null;
+          }
+        }
+        // Fallback: try to parse from HTML cards (less reliable)
+        const bookingMatch = m.content.match(/data-booking-id="([^"]+)"/);
+        if (bookingMatch) {
+          // We have a booking ID but need salon_id - this is a limitation
+          // The AI should have access to salon_id from the booking data it received
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
+  // When the user asked about a booking's location/address but the AI failed:
+  // extract salon_id from booking history, fetch salon details, return location
+  async _bookingLocationFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses = []) {
+    const lang = userContext?.language === 'nl';
+    const isLocation = /\b(location|address|locatie|adres|waar is|where is|geef mij de locatie|give me the location)\b/i.test(message);
+    if (!isLocation) return null;
+
+    let salonId = null;
+    
+    // First, try to get salon_id from function responses (most reliable)
+    if (allFunctionResponses && allFunctionResponses.length > 0) {
+      for (let i = allFunctionResponses.length - 1; i >= 0; i--) {
+        const funcResp = allFunctionResponses[i];
+        const responseData = funcResp?.functionResponse?.response?.data;
+        if (responseData) {
+          // Check if this is booking data
+          let bookings = [];
+          if (Array.isArray(responseData)) {
+            bookings = responseData;
+          } else if (responseData.data?.bookings && Array.isArray(responseData.data.bookings)) {
+            bookings = responseData.data.bookings;
+          } else if (responseData.bookings && Array.isArray(responseData.bookings)) {
+            bookings = responseData.bookings;
+          }
+          
+          if (bookings.length > 0) {
+            // Get salon_id from first booking
+            const firstBooking = bookings[0];
+            salonId = firstBooking.salon_id || firstBooking.salons?.id || (firstBooking.salon ? firstBooking.salon.id : null);
+            if (salonId) break;
+          }
+        }
+      }
+    }
+    
+    // Fallback: try to extract from history metadata
+    if (!salonId) {
+      salonId = this._getSalonIdFromBookingHistory(historyMessages);
+    }
+    
+    if (!salonId) return null;
+
+    try {
+      // Get salon details for address
+      const salonRes = await this.makeApiRequest(userId, userToken, 'GET', `/api/salons/${salonId}`, null, {});
+      const salon = salonRes?.data?.data || salonRes?.data;
+      if (!salon) return null;
+
+      const addr = [salon.address, salon.city, salon.zip_code].filter(Boolean).join(', ') || (lang ? 'Adres niet beschikbaar' : 'Address not available');
+      const lat = salon.latitude;
+      const lng = salon.longitude;
+      const mapsUrl = (lat != null && lng != null)
+        ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
+        : (salon.address || salon.city ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(salon.address || salon.city || '')}` : null);
+      const link = mapsUrl ? `<a href="${mapsUrl}">${lang ? 'Open in Google Maps' : 'Open in Google Maps'}</a>` : '';
+      
+      const salonName = salon.business_name || 'Salon';
+      
+      return `<output><p><strong>${salonName}</strong></p><p>${addr}</p>${link}</output>`;
+    } catch (e) {
+      console.error('Error in booking location fallback:', e);
+      return null;
+    }
+  }
+
   // When the user asked for one thing about one salon (picture, location, maps, services) but the AI failed:
   // fetch and return HTML. historyMessages from conversation.
   async _oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken) {
@@ -405,10 +526,21 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
         functionDeclarations: [
           {
             name: 'make_api_request',
-            description: `You have NO built-in knowledge of the user's bookings or calendar. For any question about their appointments, schedule, or "do I have X today"—realize you need data, call GET /api/bookings (upcoming "true"|"false", limit), then answer from the response. For follow-ups like "what about yesterday?", "and tomorrow?", "other days?"—same: you need fresh data for that day/scope; call GET /api/bookings (upcoming=false for yesterday/past, true for tomorrow), then answer. Do not reply with a generic.
+            description: `You have NO built-in knowledge of the user's bookings or calendar. For any question about their appointments, schedule, or "do I have X today"—realize you need data, call GET /api/bookings (upcoming "true"|"false", limit), then answer from the response. 
+
+CRITICAL: When the user asks follow-up questions about appointments you just showed (e.g. "location of the first one", "geef mij de locatie voor de eerste", "waar is de eerste boeking"):
+1. Extract the salon_id from the FIRST booking in your last response (or the specific position they mentioned like "second", "that one")
+2. Call GET /api/salons/{salonId} to get address, city, zip_code, latitude, longitude
+3. Provide the full address and a Google Maps link: <a href="https://www.google.com/maps/search/?api=1&query={lat},{lng}">Open in Google Maps</a>
+4. Do NOT just repeat the booking list or say "I'm not sure what you need"
+
+For time-based follow-ups like "what about yesterday?", "and tomorrow?", "other days?"—you need fresh data for that day/scope; call GET /api/bookings (upcoming=false for yesterday/past, true for tomorrow), then answer. Do not reply with a generic.
+
 When the user wants to book or find a salon ("best", "top rated", "popular", "recommend"): call /api/salons/search with sort=rating and latitude/longitude (from Location), or /api/salons/popular. Do NOT say "I can't"—these exist. Always render salon and booking lists as HTML <output> with ai-card and data-salon-id or data-booking-id so the user can tap and act fast.
+
 When the user asks for **one specific thing about one salon** you showed (picture, address, "open in maps", "their services"): resolve data-salon-id from the card, call GET /api/salons/{id} or GET /api/salons/{id}/services, fulfill the request, and do NOT re-list or reply with "How can I help you?"
-Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, /api/salons/{salonId}, /api/favorites, /api/services/categories. For follow-ups, answer from context; only call when you need new data. Never raw JSON. Location: ${locationInfo}.`,
+
+Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, /api/salons/{salonId}, /api/favorites, /api/services/categories. For follow-ups about items in lists you just showed, extract IDs from your last response and fetch details. Never raw JSON. Location: ${locationInfo}.`,
             parameters: {
               type: 'OBJECT',
               properties: {
@@ -1166,8 +1298,15 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
         (/\bbook\b/i.test(message) && /\b(appointment|salon)\b/i.test(message));
       const userWantsBookings = /\b(appointment|booking|bookings|plans|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b|do I have|any (plans|appointment)|(my|any) (bookings|appointments)|what about (yesterday|tomorrow|other days)|how about (yesterday|tomorrow|other days)|\bother days\b/i.test(message);
       const isOneSpecificThing = /\b(picture|image|photo|location|address|maps|map|navigate|services)\b|where is the picture|show me in maps|in a map|their services|what services|show me their services|what do they offer/i.test(message);
-      if (isGenericHelp && (userWantsSalons || isOneSpecificThing || userWantsBookings)) {
-        if (isOneSpecificThing) {
+      const isBookingLocation = /\b(location|address|locatie|adres|waar is|where is|geef mij de locatie|give me the location)\b/i.test(message) && 
+        (/\b(first|eerste|second|tweede|that|die|this|deze|booking|boeking)\b/i.test(message) || this._getBookingIdFromHistory(historyMessages));
+      if (isGenericHelp && (userWantsSalons || isOneSpecificThing || userWantsBookings || isBookingLocation)) {
+        if (isBookingLocation) {
+          try {
+            const html = await this._bookingLocationFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses);
+            if (html) { aiResponse = html; console.log('🔄 Replaced generic with booking location'); }
+          } catch (e) { /* leave generic */ }
+        } else if (isOneSpecificThing) {
           try {
             const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
             if (html) { aiResponse = html; console.log('🔄 Replaced generic with one-salon detail (picture/maps/services)'); }
@@ -1306,6 +1445,29 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
         } catch (e) { /* leave as is */ }
       }
 
+      // Store last booking data in metadata for follow-up questions
+      let lastBookingData = null;
+      if (allFunctionResponses && allFunctionResponses.length > 0) {
+        for (let i = allFunctionResponses.length - 1; i >= 0; i--) {
+          const funcResp = allFunctionResponses[i];
+          const responseData = funcResp?.functionResponse?.response?.data;
+          if (responseData) {
+            let bookings = [];
+            if (Array.isArray(responseData)) {
+              bookings = responseData;
+            } else if (responseData.data?.bookings && Array.isArray(responseData.data.bookings)) {
+              bookings = responseData.data.bookings;
+            } else if (responseData.bookings && Array.isArray(responseData.bookings)) {
+              bookings = responseData.bookings;
+            }
+            if (bookings.length > 0) {
+              lastBookingData = bookings;
+              break;
+            }
+          }
+        }
+      }
+
       // Save AI response
       const { data: aiMessage, error: aiMsgError } = await authenticatedClient
         .from('ai_messages')
@@ -1316,6 +1478,7 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
           metadata: {
             model: config.ai.gemini_model,
             tokens_used: response.usageMetadata?.totalTokenCount || null,
+            lastBookingData: lastBookingData, // Store for follow-up questions
             ...(genuiMetadata || {})
           }
         })
