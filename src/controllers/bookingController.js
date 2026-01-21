@@ -1219,5 +1219,171 @@ class BookingController {
   });
 }
 
+  // Mark booking as paid with cash (salon owner only)
+  markAsPaidCash = asyncHandler(async (req, res) => {
+    const { bookingId } = req.params;
+
+    try {
+      // Get booking to verify ownership
+      const { data: booking, error: bookingError } = await supabaseAdmin
+        .from('bookings')
+        .select('*, salons!inner(owner_id)')
+        .eq('id', bookingId)
+        .single();
+
+      if (bookingError || !booking) {
+        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+      }
+
+      // Verify the user owns the salon
+      if (booking.salons.owner_id !== req.user.id) {
+        throw new AppError('Unauthorized', 403, 'UNAUTHORIZED');
+      }
+
+      console.log(`💵 Marking booking ${bookingId} as paid cash`);
+
+      // Update or create payment record
+      const { data: existingPayment } = await supabaseAdmin
+        .from('payments')
+        .select('id')
+        .eq('booking_id', bookingId)
+        .single();
+
+      if (existingPayment) {
+        // Update existing payment
+        const { error: updateError } = await supabaseAdmin
+          .from('payments')
+          .update({
+            payment_status: 'paid',
+            payment_method: 'cash',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingPayment.id);
+
+        if (updateError) {
+          console.error('❌ Error updating payment:', updateError);
+          throw new AppError('Failed to update payment', 500, 'PAYMENT_UPDATE_FAILED');
+        }
+      } else {
+        // Create new payment record
+        const { error: createError } = await supabaseAdmin
+          .from('payments')
+          .insert({
+            booking_id: bookingId,
+            salon_id: booking.salon_id,
+            client_id: booking.client_id,
+            amount: booking.total_price || 0,
+            payment_status: 'paid',
+            payment_method: 'cash',
+          });
+
+        if (createError) {
+          console.error('❌ Error creating payment:', createError);
+          throw new AppError('Failed to create payment', 500, 'PAYMENT_CREATE_FAILED');
+        }
+      }
+
+      console.log(`✅ Booking ${bookingId} marked as paid cash`);
+
+      res.status(200).json({
+        success: true,
+        message: 'Booking marked as paid with cash',
+      });
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      console.error('Error marking as paid cash:', error);
+      throw new AppError('Failed to mark as paid cash', 500, 'MARK_PAID_CASH_FAILED');
+    }
+  });
+
+  // Send payment request to client (salon owner only)
+  sendPaymentRequest = asyncHandler(async (req, res) => {
+    const { bookingId } = req.params;
+    const { amount } = req.body;
+
+    try {
+      // Get booking to verify ownership and get client info
+      const { data: booking, error: bookingError } = await supabaseAdmin
+        .from('bookings')
+        .select('*, salons!inner(owner_id, business_name, stripe_account_id), user_profiles!bookings_client_id_fkey(id, first_name, email)')
+        .eq('id', bookingId)
+        .single();
+
+      if (bookingError || !booking) {
+        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+      }
+
+      // Verify the user owns the salon
+      if (booking.salons.owner_id !== req.user.id) {
+        throw new AppError('Unauthorized', 403, 'UNAUTHORIZED');
+      }
+
+      // Check if salon has connected Stripe account
+      if (!booking.salons.stripe_account_id) {
+        throw new AppError('Salon has not connected Stripe account', 400, 'STRIPE_NOT_CONNECTED');
+      }
+
+      console.log(`💳 Sending payment request for booking ${bookingId}, amount: €${amount}`);
+
+      // Update or create payment record with status 'requested'
+      const { data: existingPayment } = await supabaseAdmin
+        .from('payments')
+        .select('id')
+        .eq('booking_id', bookingId)
+        .single();
+
+      if (existingPayment) {
+        // Update existing payment
+        const { error: updateError } = await supabaseAdmin
+          .from('payments')
+          .update({
+            payment_status: 'requested',
+            amount: amount,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingPayment.id);
+
+        if (updateError) {
+          console.error('❌ Error updating payment:', updateError);
+          throw new AppError('Failed to update payment', 500, 'PAYMENT_UPDATE_FAILED');
+        }
+      } else {
+        // Create new payment record
+        const { error: createError } = await supabaseAdmin
+          .from('payments')
+          .insert({
+            booking_id: bookingId,
+            salon_id: booking.salon_id,
+            client_id: booking.client_id,
+            amount: amount,
+            payment_status: 'requested',
+            payment_method: 'ideal', // Default, client can choose
+          });
+
+        if (createError) {
+          console.error('❌ Error creating payment:', createError);
+          throw new AppError('Failed to create payment', 500, 'PAYMENT_CREATE_FAILED');
+        }
+      }
+
+      console.log(`✅ Payment request sent for booking ${bookingId}`);
+
+      // TODO: Send notification to client (push notification, email, etc.)
+
+      res.status(200).json({
+        success: true,
+        message: 'Payment request sent to client',
+      });
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      console.error('Error sending payment request:', error);
+      throw new AppError('Failed to send payment request', 500, 'SEND_PAYMENT_REQUEST_FAILED');
+    }
+  });
+
 module.exports = new BookingController();
 
