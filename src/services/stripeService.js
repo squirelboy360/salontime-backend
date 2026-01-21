@@ -309,10 +309,18 @@ class StripeService {
             await this.handleAccountUpdated(event.data.object);
           }
           break;
+        case 'checkout.session.completed':
+          console.log('💳 Checkout session completed:', event.data.object.id);
+          await this._handleCheckoutSessionCompleted(event.data.object);
+          break;
         case 'payment_intent.succeeded':
+          console.log('💳 Payment intent succeeded:', event.data.object.id);
+          await this._handlePaymentIntentSucceeded(event.data.object);
           await this.handlePaymentSucceeded(event.data.object);
           break;
         case 'payment_intent.payment_failed':
+          console.log('💳 Payment intent failed:', event.data.object.id);
+          await this._handlePaymentIntentFailed(event.data.object);
           await this.handlePaymentFailed(event.data.object);
           break;
         case 'customer.subscription.created':
