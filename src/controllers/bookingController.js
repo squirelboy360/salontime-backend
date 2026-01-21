@@ -1291,7 +1291,7 @@ class BookingController {
           .insert({
             booking_id: bookingId,
             amount: booking.total_price || 0,
-            payment_status: 'paid',
+            status: 'paid',
             payment_method: 'cash',
           });
 
@@ -1398,7 +1398,7 @@ class BookingController {
         const paymentData = {
           booking_id: bookingId,
           amount: amount,
-          payment_status: 'requested',
+          status: 'requested',
           payment_method: 'ideal', // Default, client can choose
         };
         console.log(`💳 Payment data:`, paymentData);
