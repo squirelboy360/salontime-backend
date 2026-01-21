@@ -1538,5 +1538,83 @@ class SalonController {
   });
 }
 
+  /**
+   * Track salon view/impression
+   * Records in salon_views table and increments salon.view_count
+   */
+  trackSalonView = asyncHandler(async (req, res) => {
+    const { salonId } = req.params;
+
+    try {
+      // Record view in salon_views table
+      const viewData = {
+        salon_id: salonId,
+        user_id: req.user?.id || null, // null for anonymous views
+        session_id: req.headers['x-session-id'] || null,
+        source: req.headers['x-source'] || 'app',
+        device_type: req.headers['x-device-type'] || 'mobile',
+        viewed_at: new Date().toISOString(),
+      };
+
+      await supabaseAdmin
+        .from('salon_views')
+        .insert(viewData);
+
+      // Increment view_count on salon
+      await supabaseAdmin.rpc('increment_salon_view_count', {
+        salon_id_param: salonId
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'View tracked'
+      });
+
+    } catch (error) {
+      console.error('Error tracking salon view:', error);
+      // Don't throw error - view tracking should not block the app
+      res.status(200).json({
+        success: false,
+        message: 'View tracking failed but continuing'
+      });
+    }
+  });
+
+  /**
+   * Track salon favorite
+   * Increments salon.favorite_count
+   */
+  trackSalonFavorite = asyncHandler(async (req, res) => {
+    const { salonId } = req.params;
+    const { action } = req.body; // 'add' or 'remove'
+
+    try {
+      if (action === 'add') {
+        // Increment favorite_count
+        await supabaseAdmin.rpc('increment_salon_favorite_count', {
+          salon_id_param: salonId
+        });
+      } else if (action === 'remove') {
+        // Decrement favorite_count
+        await supabaseAdmin.rpc('decrement_salon_favorite_count', {
+          salon_id_param: salonId
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Favorite tracked'
+      });
+
+    } catch (error) {
+      console.error('Error tracking salon favorite:', error);
+      res.status(200).json({
+        success: false,
+        message: 'Favorite tracking failed but continuing'
+      });
+    }
+  });
+}
+
 module.exports = new SalonController();
 
