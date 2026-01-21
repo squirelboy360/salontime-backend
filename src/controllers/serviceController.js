@@ -72,15 +72,18 @@ class ServiceController {
     const salonId = salon.id;
 
     try {
+      // Convert empty string category_id to null
+      const categoryIdValue = category_id && category_id.trim() !== '' ? category_id : null;
+
       const { data: service, error } = await supabase
         .from('services')
         .insert({
           salon_id: salonId,
           name,
-          description,
+          description: description || null,
           price: parseFloat(price),
           duration: parseInt(duration),
-          category_id,
+          category_id: categoryIdValue,
           is_active
         })
         .select(`
@@ -90,7 +93,8 @@ class ServiceController {
         .single();
 
       if (error) {
-        throw new AppError('Failed to create service', 500, 'CREATE_FAILED');
+        console.error('Service creation error:', error);
+        throw new AppError(`Failed to create service: ${error.message}`, 500, 'CREATE_FAILED');
       }
 
       res.status(201).json({
@@ -99,10 +103,11 @@ class ServiceController {
       });
 
     } catch (error) {
+      console.error('Service creation catch error:', error);
       if (error instanceof AppError) {
         throw error;
       }
-      throw new AppError('Failed to create service', 500, 'CREATE_FAILED');
+      throw new AppError(`Failed to create service: ${error.message || 'Unknown error'}`, 500, 'CREATE_FAILED');
     }
   });
 
