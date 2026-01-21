@@ -1434,6 +1434,102 @@ class BookingController {
       throw new AppError('Failed to send payment request', 500, 'SEND_PAYMENT_REQUEST_FAILED');
     }
   });
+
+  /**
+   * Create Stripe payment intent for client to pay
+   */
+  createPaymentIntent = asyncHandler(async (req, res) => {
+    try {
+      const { bookingId } = req.params;
+      console.log(`💳 Creating payment intent for booking: ${bookingId}`);
+
+      // Get booking with payment details
+      const { data: booking, error: bookingError } = await supabaseAdmin
+        .from('bookings')
+        .select(`
+          *,
+          services(name, price),
+          salons!inner(business_name, stripe_account_id)
+        `)
+        .eq('id', bookingId)
+        .single();
+
+      if (bookingError || !booking) {
+        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+      }
+
+      // Verify this is the client's booking
+      if (booking.client_id !== req.user.id) {
+        throw new AppError('Unauthorized', 403, 'UNAUTHORIZED');
+      }
+
+      // Get or create payment record
+      let payment = await supabaseAdmin
+        .from('payments')
+        .select('*')
+        .eq('booking_id', bookingId)
+        .maybeSingle();
+
+      if (!payment.data) {
+        throw new AppError('Payment not found', 404, 'PAYMENT_NOT_FOUND');
+      }
+
+      const paymentRecord = payment.data;
+      const amount = parseFloat(paymentRecord.amount);
+      const stripeAccountId = booking.salons.stripe_account_id;
+
+      if (!stripeAccountId) {
+        throw new AppError('Salon payment not configured', 400, 'STRIPE_NOT_CONFIGURED');
+      }
+
+      console.log(`💳 Creating Stripe payment intent: €${amount} for salon: ${stripeAccountId}`);
+
+      // Create Stripe payment intent
+      const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: Math.round(amount * 100), // Convert to cents
+        currency: 'eur',
+        payment_method_types: ['ideal', 'card'],
+        application_fee_amount: Math.round(amount * 100 * 0.05), // 5% platform fee
+        transfer_data: {
+          destination: stripeAccountId,
+        },
+        metadata: {
+          booking_id: bookingId,
+          salon_name: booking.salons.business_name,
+          service_name: booking.services.name,
+        },
+      });
+
+      // Update payment record with payment intent ID
+      await supabaseAdmin
+        .from('payments')
+        .update({
+          stripe_payment_intent_id: paymentIntent.id,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', paymentRecord.id);
+
+      console.log(`✅ Payment intent created: ${paymentIntent.id}`);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          clientSecret: paymentIntent.client_secret,
+          publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+          amount: amount,
+          currency: 'eur',
+        }
+      });
+
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      console.error('Error creating payment intent:', error);
+      throw new AppError('Failed to create payment intent', 500, 'PAYMENT_INTENT_FAILED');
+    }
+  });
 }
 
 module.exports = new BookingController();
