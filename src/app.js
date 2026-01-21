@@ -28,6 +28,7 @@ const cronRoutes = require('./routes/cronRoutes');
 const businessHoursRoutes = require('./routes/businessHours');
 const reviewRoutes = require('./routes/reviewRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+const webhookRoutes = require('./routes/webhookRoutes');
 
 // Validate configuration
 config.validate();
