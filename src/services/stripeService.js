@@ -796,12 +796,16 @@ class StripeService {
       console.log(`💳 Found existing payment:`, existingPayment);
 
       // Update payment status to succeeded
+      const paymentMethod = session.payment_method_types?.[0] === 'card' 
+          ? (session.payment_intent_data?.payment_method_options?.card?.wallet?.type || 'card')
+          : (session.payment_method_types?.[0] || 'online');
+
       const { data: updatedPayment, error: paymentError } = await supabaseAdmin
         .from('payments')
         .update({
           status: 'succeeded',
           stripe_payment_intent_id: session.payment_intent,
-          payment_method: session.payment_method_types?.[0] || null,
+          payment_method: paymentMethod, // Store actual method (apple_pay, card, ideal)
           updated_at: new Date().toISOString(),
         })
         .eq('booking_id', bookingId)

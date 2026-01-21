@@ -1382,7 +1382,7 @@ class BookingController {
         const { error: updateError } = await supabaseAdmin
           .from('payments')
           .update({
-            status: 'pending', // Payment request sent, awaiting payment
+            status: 'pending', 
             amount: amount,
             updated_at: new Date().toISOString(),
           })
@@ -1390,17 +1390,27 @@ class BookingController {
 
         if (updateError) {
           console.error('❌ Error updating payment:', updateError);
-          throw new AppError('Failed to update payment', 500, 'PAYMENT_UPDATE_FAILED');
+          // Fallback: try status 'unpaid' if 'pending' violates constraint
+          const { error: fallbackError } = await supabaseAdmin
+            .from('payments')
+            .update({
+              status: 'unpaid',
+              amount: amount,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', existingPayment.id);
+          
+          if (fallbackError) throw new AppError('Failed to update payment', 500, 'PAYMENT_UPDATE_FAILED');
         }
-        console.log(`✅ Payment updated to 'requested'`);
+        console.log(`✅ Payment updated`);
       } else {
         // Create new payment record
         console.log(`💳 Creating new payment record for booking ${bookingId}`);
         const paymentData = {
           booking_id: bookingId,
           amount: amount,
-          status: 'pending', // Payment request sent, awaiting payment
-          payment_method: null, // Will be set by Stripe webhook after payment
+          status: 'pending',
+          payment_method: 'online', // Use 'online' instead of null
         };
         console.log(`💳 Payment data:`, paymentData);
 
@@ -1412,10 +1422,18 @@ class BookingController {
 
         if (createError) {
           console.error('❌ Error creating payment:', createError);
-          console.error('❌ Payment data:', paymentData);
-          throw new AppError('Failed to create payment', 500, 'PAYMENT_CREATE_FAILED');
+          // Fallback: try status 'unpaid'
+          const { data: fallbackPayment, error: fallbackError } = await supabaseAdmin
+            .from('payments')
+            .insert({ ...paymentData, status: 'unpaid' })
+            .select()
+            .single();
+            
+          if (fallbackError) throw new AppError('Failed to create payment', 500, 'PAYMENT_CREATE_FAILED');
+          console.log(`✅ Payment created (fallback):`, fallbackPayment.id);
+        } else {
+          console.log(`✅ Payment created:`, newPayment.id);
         }
-        console.log(`✅ Payment created:`, newPayment.id);
       }
 
       console.log(`✅ Payment request sent for booking ${bookingId}`);
