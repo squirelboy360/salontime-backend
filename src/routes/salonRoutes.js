@@ -11,6 +11,10 @@ router.get('/search', salonController.searchSalons);
 router.get('/:salonId', salonController.getSalon);
 router.get('/:salonId/services', salonController.getSalonServices);
 
+// Tracking routes (optional auth - tracks anonymous users too)
+router.post('/:salonId/track-view', salonController.trackSalonView);
+router.post('/:salonId/track-favorite', salonController.trackSalonFavorite);
+
 // Protected routes (require authentication)
 router.use(authenticateToken);
 
