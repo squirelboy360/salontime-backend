@@ -57,11 +57,19 @@ class ServiceController {
   // Create a new service
   createService = asyncHandler(async (req, res) => {
     const { name, description, price, duration, category_id, is_active = true } = req.body;
-    const salonId = req.user.salon_id;
+    
+    // Get user's salon
+    const { data: salon, error: salonError } = await supabase
+      .from('salons')
+      .select('id')
+      .eq('owner_id', req.user.id)
+      .single();
 
-    if (!salonId) {
+    if (salonError || !salon) {
       throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
     }
+
+    const salonId = salon.id;
 
     try {
       const { data: service, error } = await supabase
@@ -102,11 +110,19 @@ class ServiceController {
   updateService = asyncHandler(async (req, res) => {
     const { serviceId } = req.params;
     const { name, description, price, duration, category_id, is_active } = req.body;
-    const salonId = req.user.salon_id;
+    
+    // Get user's salon
+    const { data: salon, error: salonError } = await supabase
+      .from('salons')
+      .select('id')
+      .eq('owner_id', req.user.id)
+      .single();
 
-    if (!salonId) {
+    if (salonError || !salon) {
       throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
     }
+
+    const salonId = salon.id;
 
     try {
       const updateData = {};
@@ -148,11 +164,19 @@ class ServiceController {
   // Delete a service
   deleteService = asyncHandler(async (req, res) => {
     const { serviceId } = req.params;
-    const salonId = req.user.salon_id;
+    
+    // Get user's salon
+    const { data: salon, error: salonError } = await supabase
+      .from('salons')
+      .select('id')
+      .eq('owner_id', req.user.id)
+      .single();
 
-    if (!salonId) {
+    if (salonError || !salon) {
       throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
     }
+
+    const salonId = salon.id;
 
     try {
       const { error } = await supabase
