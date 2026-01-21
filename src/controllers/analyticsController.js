@@ -113,7 +113,7 @@ class AnalyticsController {
    * Get booking metrics
    */
   _getBookingMetrics = async (salonId, startDate) => {
-    const { data: bookings, error } = await supabase
+    const { data: bookings, error } = await supabaseAdmin
       .from('bookings')
       .select('*')
       .eq('salon_id', salonId)
@@ -155,7 +155,7 @@ class AnalyticsController {
    * Get view/impression metrics
    */
   _getViewMetrics = async (salonId, startDate) => {
-    const { data: views, error } = await supabase
+    const { data: views, error } = await supabaseAdmin
       .from('salon_views')
       .select('*')
       .eq('salon_id', salonId)
@@ -185,7 +185,7 @@ class AnalyticsController {
    * Get favorites metrics
    */
   _getFavoritesMetrics = async (salonId) => {
-    const { data: favorites, error, count } = await supabase
+    const { data: favorites, error, count } = await supabaseAdmin
       .from('user_favorites')
       .select('*, user_profiles(first_name, last_name, avatar_url)', { count: 'exact' })
       .eq('salon_id', salonId);
@@ -218,7 +218,7 @@ class AnalyticsController {
    * Get review metrics
    */
   _getReviewMetrics = async (salonId, startDate) => {
-    const { data: reviews, error } = await supabase
+    const { data: reviews, error } = await supabaseAdmin
       .from('reviews')
       .select(`
         *,
@@ -271,7 +271,7 @@ class AnalyticsController {
    * Get salon-level metrics (from salons table)
    */
   _getSalonMetrics = async (salonId) => {
-    const { data: salon, error } = await supabase
+    const { data: salon, error } = await supabaseAdmin
       .from('salons')
       .select('view_count, booking_count, favorite_count, trending_score, rating_average, rating_count')
       .eq('id', salonId)
