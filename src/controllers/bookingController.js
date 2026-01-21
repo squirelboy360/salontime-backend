@@ -1222,15 +1222,27 @@ class BookingController {
   markAsPaidCash = asyncHandler(async (req, res) => {
     const { bookingId } = req.params;
 
+    console.log(`💵 markAsPaidCash called for booking: ${bookingId}`);
+
     try {
       // Get booking to verify ownership
       const { data: booking, error: bookingError } = await supabaseAdmin
         .from('bookings')
-        .select('*, salons!inner(owner_id)')
+        .select(`
+          *,
+          salons!bookings_salon_id_fkey(owner_id)
+        `)
         .eq('id', bookingId)
         .single();
 
-      if (bookingError || !booking) {
+      console.log(`💵 Booking query result:`, { booking: booking?.id, error: bookingError });
+
+      if (bookingError) {
+        console.error('❌ Booking query error:', bookingError);
+        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+      }
+
+      if (!booking) {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
       }
 
@@ -1302,15 +1314,28 @@ class BookingController {
     const { bookingId } = req.params;
     const { amount } = req.body;
 
+    console.log(`💳 sendPaymentRequest called for booking: ${bookingId}, amount: ${amount}`);
+
     try {
       // Get booking to verify ownership and get client info
       const { data: booking, error: bookingError } = await supabaseAdmin
         .from('bookings')
-        .select('*, salons!inner(owner_id, business_name, stripe_account_id), user_profiles!bookings_client_id_fkey(id, first_name, email)')
+        .select(`
+          *,
+          salons!bookings_salon_id_fkey(owner_id, business_name, stripe_account_id),
+          user_profiles!bookings_client_id_fkey(id, first_name, email)
+        `)
         .eq('id', bookingId)
         .single();
 
-      if (bookingError || !booking) {
+      console.log(`💳 Booking query result:`, { booking: booking?.id, error: bookingError });
+
+      if (bookingError) {
+        console.error('❌ Booking query error:', bookingError);
+        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+      }
+
+      if (!booking) {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
       }
 
