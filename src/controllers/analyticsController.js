@@ -36,14 +36,22 @@ class AnalyticsController {
         viewsData,
         favoritesData,
         reviewsData,
-        salonMetrics
+        salonMetrics,
+        peakHoursData,
+        servicePopularityData,
+        clientRetentionData,
+        performanceMetrics
       ] = await Promise.all([
         this._getRevenueMetrics(salonId, startDate),
         this._getBookingMetrics(salonId, startDate),
         this._getViewMetrics(salonId, startDate),
         this._getFavoritesMetrics(salonId),
         this._getReviewMetrics(salonId, startDate),
-        this._getSalonMetrics(salonId)
+        this._getSalonMetrics(salonId),
+        this._getPeakHours(salonId, startDate),
+        this._getServicePopularity(salonId, startDate),
+        this._getClientRetention(salonId, startDate),
+        this._getPerformanceMetrics(salonId, startDate)
       ]);
 
       res.status(200).json({
@@ -55,6 +63,10 @@ class AnalyticsController {
           favorites: favoritesData,
           reviews: reviewsData,
           metrics: salonMetrics,
+          peakHours: peakHoursData,
+          servicePopularity: servicePopularityData,
+          clientRetention: clientRetentionData,
+          performance: performanceMetrics,
           period: {
             days: daysAgo,
             start: startDate.toISOString(),
@@ -378,6 +390,198 @@ class AnalyticsController {
       throw new AppError('Failed to fetch reviews', 500, 'REVIEWS_FETCH_ERROR');
     }
   });
+  /**
+   * Get peak hours analytics
+   */
+  _getPeakHours = async (salonId, startDate) => {
+    const { data: bookings, error } = await supabaseAdmin
+      .from('bookings')
+      .select('start_time, appointment_date')
+      .eq('salon_id', salonId)
+      .gte('appointment_date', startDate.toISOString().split('T')[0])
+      .not('status', 'eq', 'cancelled');
+
+    if (error || !bookings) {
+      return { hourly: [], daily: [] };
+    }
+
+    // Group by hour (0-23)
+    const hourCounts = Array(24).fill(0);
+    bookings.forEach(b => {
+      if (b.start_time) {
+        const hour = parseInt(b.start_time.split(':')[0]);
+        if (!isNaN(hour) && hour >= 0 && hour < 24) {
+          hourCounts[hour]++;
+        }
+      }
+    });
+
+    // Group by day of week (0=Sun, 6=Sat)
+    const dayCounts = Array(7).fill(0);
+    bookings.forEach(b => {
+      if (b.appointment_date) {
+        const date = new Date(b.appointment_date);
+        const day = date.getDay();
+        dayCounts[day]++;
+      }
+    });
+
+    return {
+      hourly: hourCounts.map((count, hour) => ({ hour, count })),
+      daily: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => ({
+        day,
+        count: dayCounts[index]
+      }))
+    };
+  };
+
+  /**
+   * Get service popularity and revenue
+   */
+  _getServicePopularity = async (salonId, startDate) => {
+    const { data: bookings, error } = await supabaseAdmin
+      .from('bookings')
+      .select(`
+        service_id,
+        total_price,
+        services(name, category, price)
+      `)
+      .eq('salon_id', salonId)
+      .gte('appointment_date', startDate.toISOString().split('T')[0])
+      .not('status', 'eq', 'cancelled');
+
+    if (error || !bookings) {
+      return { topServices: [], byCategory: [] };
+    }
+
+    // Group by service
+    const serviceStats = {};
+    bookings.forEach(b => {
+      const serviceId = b.service_id;
+      const serviceName = b.services?.name || 'Unknown';
+      const category = b.services?.category || 'Other';
+      const price = parseFloat(b.total_price || b.services?.price || 0);
+
+      if (!serviceStats[serviceId]) {
+        serviceStats[serviceId] = {
+          id: serviceId,
+          name: serviceName,
+          category,
+          bookings: 0,
+          revenue: 0
+        };
+      }
+      serviceStats[serviceId].bookings++;
+      serviceStats[serviceId].revenue += price;
+    });
+
+    const topServices = Object.values(serviceStats)
+      .sort((a, b) => b.bookings - a.bookings)
+      .slice(0, 10);
+
+    // Group by category
+    const categoryStats = {};
+    bookings.forEach(b => {
+      const category = b.services?.category || 'Other';
+      const price = parseFloat(b.total_price || b.services?.price || 0);
+
+      if (!categoryStats[category]) {
+        categoryStats[category] = { category, bookings: 0, revenue: 0 };
+      }
+      categoryStats[category].bookings++;
+      categoryStats[category].revenue += price;
+    });
+
+    const byCategory = Object.values(categoryStats)
+      .sort((a, b) => b.revenue - a.revenue);
+
+    return { topServices, byCategory };
+  };
+
+  /**
+   * Get client retention metrics
+   */
+  _getClientRetention = async (salonId, startDate) => {
+    const { data: bookings, error } = await supabaseAdmin
+      .from('bookings')
+      .select('client_id, appointment_date')
+      .eq('salon_id', salonId)
+      .gte('appointment_date', startDate.toISOString().split('T')[0])
+      .eq('status', 'completed');
+
+    if (error || !bookings) {
+      return { newClients: 0, returningClients: 0, retentionRate: 0, topClients: [] };
+    }
+
+    // Get unique clients in this period
+    const clientIds = [...new Set(bookings.map(b => b.client_id))];
+    
+    // Check which clients had bookings before this period
+    const { data: previousBookings, error: prevError } = await supabaseAdmin
+      .from('bookings')
+      .select('client_id')
+      .eq('salon_id', salonId)
+      .lt('appointment_date', startDate.toISOString().split('T')[0])
+      .in('client_id', clientIds)
+      .eq('status', 'completed');
+
+    const returningClientIds = new Set(previousBookings?.map(b => b.client_id) || []);
+    const newClients = clientIds.filter(id => !returningClientIds.has(id)).length;
+    const returningClients = clientIds.filter(id => returningClientIds.has(id)).length;
+    const retentionRate = clientIds.length > 0 ? (returningClients / clientIds.length) * 100 : 0;
+
+    // Get top clients by booking count
+    const clientBookingCounts = {};
+    bookings.forEach(b => {
+      clientBookingCounts[b.client_id] = (clientBookingCounts[b.client_id] || 0) + 1;
+    });
+
+    const topClients = Object.entries(clientBookingCounts)
+      .map(([clientId, count]) => ({ clientId, bookings: count }))
+      .sort((a, b) => b.bookings - a.bookings)
+      .slice(0, 10);
+
+    return { newClients, returningClients, retentionRate, topClients };
+  };
+
+  /**
+   * Get performance metrics (cancellation rate, completion rate, etc.)
+   */
+  _getPerformanceMetrics = async (salonId, startDate) => {
+    const { data: bookings, error } = await supabaseAdmin
+      .from('bookings')
+      .select('status, created_at, appointment_date')
+      .eq('salon_id', salonId)
+      .gte('appointment_date', startDate.toISOString().split('T')[0]);
+
+    if (error || !bookings) {
+      return {
+        cancellationRate: 0,
+        completionRate: 0,
+        noShowRate: 0,
+        totalBookings: 0
+      };
+    }
+
+    const total = bookings.length;
+    const cancelled = bookings.filter(b => b.status === 'cancelled').length;
+    const completed = bookings.filter(b => b.status === 'completed').length;
+    const noShow = bookings.filter(b => b.status === 'no_show').length;
+
+    return {
+      cancellationRate: total > 0 ? (cancelled / total) * 100 : 0,
+      completionRate: total > 0 ? (completed / total) * 100 : 0,
+      noShowRate: total > 0 ? (noShow / total) * 100 : 0,
+      totalBookings: total,
+      statusBreakdown: {
+        cancelled,
+        completed,
+        noShow,
+        confirmed: bookings.filter(b => b.status === 'confirmed').length,
+        pending: bookings.filter(b => b.status === 'pending').length
+      }
+    };
+  };
 }
 
 module.exports = new AnalyticsController();
