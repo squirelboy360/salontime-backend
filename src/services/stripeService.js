@@ -751,6 +751,104 @@ class StripeService {
       throw new AppError(`Webhook signature verification failed: ${error.message}`, 400, 'WEBHOOK_VERIFICATION_FAILED');
     }
   }
+
+  /**
+   * Handle successful checkout session
+   */
+  async _handleCheckoutSessionCompleted(session) {
+    const { supabaseAdmin } = require('../config/database');
+    console.log(`💳 Processing checkout session: ${session.id}`);
+    console.log(`💳 Payment status: ${session.payment_status}`);
+    console.log(`💳 Metadata:`, session.metadata);
+
+    const bookingId = session.metadata?.booking_id;
+
+    if (!bookingId) {
+      console.error('❌ No booking_id in session metadata');
+      return;
+    }
+
+    try {
+      // Update payment status to succeeded
+      const { error: paymentError } = await supabaseAdmin
+        .from('payments')
+        .update({
+          status: 'succeeded',
+          stripe_payment_intent_id: session.payment_intent,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('booking_id', bookingId);
+
+      if (paymentError) {
+        console.error('❌ Error updating payment:', paymentError);
+        return;
+      }
+
+      console.log(`✅ Payment updated to succeeded for booking: ${bookingId}`);
+
+      // Update booking status to confirmed
+      const { error: bookingError } = await supabaseAdmin
+        .from('bookings')
+        .update({
+          status: 'confirmed',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', bookingId)
+        .eq('status', 'pending');
+
+      if (bookingError) {
+        console.error('❌ Error updating booking:', bookingError);
+      } else {
+        console.log(`✅ Booking confirmed: ${bookingId}`);
+      }
+    } catch (error) {
+      console.error('❌ Error handling checkout session:', error);
+    }
+  }
+
+  /**
+   * Handle successful payment intent
+   */
+  async _handlePaymentIntentSucceeded(paymentIntent) {
+    const { supabaseAdmin } = require('../config/database');
+    console.log(`💳 Processing payment intent: ${paymentIntent.id}`);
+
+    try {
+      await supabaseAdmin
+        .from('payments')
+        .update({
+          status: 'succeeded',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('stripe_payment_intent_id', paymentIntent.id);
+
+      console.log(`✅ Payment updated to succeeded via payment_intent`);
+    } catch (error) {
+      console.error('❌ Error handling payment intent:', error);
+    }
+  }
+
+  /**
+   * Handle failed payment intent
+   */
+  async _handlePaymentIntentFailed(paymentIntent) {
+    const { supabaseAdmin } = require('../config/database');
+    console.log(`💳 Processing failed payment: ${paymentIntent.id}`);
+
+    try {
+      await supabaseAdmin
+        .from('payments')
+        .update({
+          status: 'failed',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('stripe_payment_intent_id', paymentIntent.id);
+
+      console.log(`✅ Payment updated to failed`);
+    } catch (error) {
+      console.error('❌ Error handling failed payment:', error);
+    }
+  }
 }
 
 module.exports = new StripeService();
