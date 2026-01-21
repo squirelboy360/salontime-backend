@@ -1400,7 +1400,7 @@ class BookingController {
           booking_id: bookingId,
           amount: amount,
           status: 'pending', // Payment request sent, awaiting payment
-          payment_method: 'ideal', // Default, client can choose
+          payment_method: null, // Will be set by Stripe webhook after payment
         };
         console.log(`💳 Payment data:`, paymentData);
 

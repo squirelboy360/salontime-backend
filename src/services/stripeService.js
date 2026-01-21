@@ -767,6 +767,8 @@ class StripeService {
     const { supabaseAdmin } = require('../config/database');
     console.log(`💳 Processing checkout session: ${session.id}`);
     console.log(`💳 Payment status: ${session.payment_status}`);
+    console.log(`💳 Payment intent: ${session.payment_intent}`);
+    console.log(`💳 Amount total: ${session.amount_total}`);
     console.log(`💳 Metadata:`, session.metadata);
 
     const bookingId = session.metadata?.booking_id;
@@ -777,37 +779,57 @@ class StripeService {
     }
 
     try {
+      // First, check if payment record exists
+      const { data: existingPayment, error: checkError } = await supabaseAdmin
+        .from('payments')
+        .select('*')
+        .eq('booking_id', bookingId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (checkError) {
+        console.error('❌ Error finding payment:', checkError);
+        return;
+      }
+
+      console.log(`💳 Found existing payment:`, existingPayment);
+
       // Update payment status to succeeded
-      const { error: paymentError } = await supabaseAdmin
+      const { data: updatedPayment, error: paymentError } = await supabaseAdmin
         .from('payments')
         .update({
           status: 'succeeded',
           stripe_payment_intent_id: session.payment_intent,
+          payment_method: session.payment_method_types?.[0] || null,
           updated_at: new Date().toISOString(),
         })
-        .eq('booking_id', bookingId);
+        .eq('booking_id', bookingId)
+        .select()
+        .single();
 
       if (paymentError) {
         console.error('❌ Error updating payment:', paymentError);
         return;
       }
 
-      console.log(`✅ Payment updated to succeeded for booking: ${bookingId}`);
+      console.log(`✅ Payment updated to succeeded:`, updatedPayment);
 
       // Update booking status to confirmed
-      const { error: bookingError } = await supabaseAdmin
+      const { data: updatedBooking, error: bookingError } = await supabaseAdmin
         .from('bookings')
         .update({
           status: 'confirmed',
           updated_at: new Date().toISOString(),
         })
         .eq('id', bookingId)
-        .eq('status', 'pending');
+        .select()
+        .single();
 
       if (bookingError) {
         console.error('❌ Error updating booking:', bookingError);
       } else {
-        console.log(`✅ Booking confirmed: ${bookingId}`);
+        console.log(`✅ Booking confirmed:`, updatedBooking);
       }
     } catch (error) {
       console.error('❌ Error handling checkout session:', error);
