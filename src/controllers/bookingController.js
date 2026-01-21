@@ -1381,7 +1381,7 @@ class BookingController {
         const { error: updateError } = await supabaseAdmin
           .from('payments')
           .update({
-            status: 'requested',
+            status: 'pending', // Payment request sent, awaiting payment
             amount: amount,
             updated_at: new Date().toISOString(),
           })
@@ -1398,7 +1398,7 @@ class BookingController {
         const paymentData = {
           booking_id: bookingId,
           amount: amount,
-          status: 'requested',
+          status: 'pending', // Payment request sent, awaiting payment
           payment_method: 'ideal', // Default, client can choose
         };
         console.log(`💳 Payment data:`, paymentData);
