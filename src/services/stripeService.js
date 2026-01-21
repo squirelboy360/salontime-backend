@@ -286,12 +286,28 @@ class StripeService {
       switch (event.type) {
         case 'account.updated':
         case 'connect.account.updated':
+          // Standard payload - account object is in event.data.object
+          await this.handleAccountUpdated(event.data.object);
+          break;
         case 'v2.core.account.updated': // Stripe Connect v2 event (thin payload)
-          // v2 events have different structure - extract account from nested structure
-          const account = event.type.startsWith('v2.') 
-            ? event.data.object 
-            : event.data.object;
-          await this.handleAccountUpdated(account);
+          // Thin payload only contains account ID - need to fetch full account
+          const accountId = event.data.object.id;
+          console.log('📥 Thin payload received for account:', accountId);
+          try {
+            // Fetch full account details from Stripe
+            const fullAccount = await this.stripe.accounts.retrieve(accountId);
+            console.log('✅ Fetched full account details:', {
+              id: fullAccount.id,
+              charges_enabled: fullAccount.charges_enabled,
+              payouts_enabled: fullAccount.payouts_enabled,
+              details_submitted: fullAccount.details_submitted,
+            });
+            await this.handleAccountUpdated(fullAccount);
+          } catch (fetchError) {
+            console.error('❌ Failed to fetch account details:', fetchError);
+            // Still try to handle with what we have
+            await this.handleAccountUpdated(event.data.object);
+          }
           break;
         case 'payment_intent.succeeded':
           await this.handlePaymentSucceeded(event.data.object);
@@ -338,19 +354,33 @@ class StripeService {
         requirements: account.requirements
       });
 
+      // Determine account status
+      // Account is active if charges and payouts are enabled
+      // But if details_submitted is true, onboarding is complete even if not fully active yet
       const isActive = account.charges_enabled && account.payouts_enabled;
       const status = isActive ? 'active' : 'pending';
+      const onboardingCompleted = account.details_submitted === true;
+
+      console.log('📊 Account status update:', {
+        account_id: account.id,
+        charges_enabled: account.charges_enabled,
+        payouts_enabled: account.payouts_enabled,
+        details_submitted: account.details_submitted,
+        onboarding_completed: onboardingCompleted,
+        status: status,
+      });
 
       // Update stripe_accounts table
       const { error: accountsError } = await supabaseAdmin
         .from('stripe_accounts')
         .update({
           account_status: status,
-          charges_enabled: account.charges_enabled,
-          payouts_enabled: account.payouts_enabled,
-          details_submitted: account.details_submitted,
-          capabilities: account.capabilities,
-          requirements: account.requirements,
+          onboarding_completed: onboardingCompleted,
+          charges_enabled: account.charges_enabled || false,
+          payouts_enabled: account.payouts_enabled || false,
+          details_submitted: account.details_submitted || false,
+          capabilities: account.capabilities || {},
+          requirements: account.requirements || {},
           updated_at: new Date().toISOString()
         })
         .eq('stripe_account_id', account.id);
