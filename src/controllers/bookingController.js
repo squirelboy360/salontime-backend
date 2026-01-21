@@ -1369,14 +1369,17 @@ class BookingController {
       console.log(`💳 Sending payment request for booking ${bookingId}, amount: €${amount}`);
 
       // Update or create payment record with status 'requested'
-      const { data: existingPayment } = await supabaseAdmin
+      const { data: existingPayment, error: checkError } = await supabaseAdmin
         .from('payments')
         .select('id')
         .eq('booking_id', bookingId)
-        .single();
+        .maybeSingle();
+
+      console.log(`💳 Existing payment check:`, { exists: !!existingPayment, error: checkError });
 
       if (existingPayment) {
         // Update existing payment
+        console.log(`💳 Updating existing payment: ${existingPayment.id}`);
         const { error: updateError } = await supabaseAdmin
           .from('payments')
           .update({
@@ -1390,23 +1393,32 @@ class BookingController {
           console.error('❌ Error updating payment:', updateError);
           throw new AppError('Failed to update payment', 500, 'PAYMENT_UPDATE_FAILED');
         }
+        console.log(`✅ Payment updated to 'requested'`);
       } else {
         // Create new payment record
-        const { error: createError } = await supabaseAdmin
+        console.log(`💳 Creating new payment record for booking ${bookingId}`);
+        const paymentData = {
+          booking_id: bookingId,
+          salon_id: booking.salon_id,
+          client_id: booking.client_id,
+          amount: amount,
+          payment_status: 'requested',
+          payment_method: 'ideal', // Default, client can choose
+        };
+        console.log(`💳 Payment data:`, paymentData);
+
+        const { data: newPayment, error: createError } = await supabaseAdmin
           .from('payments')
-          .insert({
-            booking_id: bookingId,
-            salon_id: booking.salon_id,
-            client_id: booking.client_id,
-            amount: amount,
-            payment_status: 'requested',
-            payment_method: 'ideal', // Default, client can choose
-          });
+          .insert(paymentData)
+          .select()
+          .single();
 
         if (createError) {
           console.error('❌ Error creating payment:', createError);
+          console.error('❌ Payment data:', paymentData);
           throw new AppError('Failed to create payment', 500, 'PAYMENT_CREATE_FAILED');
         }
+        console.log(`✅ Payment created:`, newPayment.id);
       }
 
       console.log(`✅ Payment request sent for booking ${bookingId}`);
