@@ -1217,7 +1217,6 @@ class BookingController {
       throw new AppError('Failed to cancel booking', 500, 'BOOKING_CANCEL_FAILED');
     }
   });
-}
 
   // Mark booking as paid with cash (salon owner only)
   markAsPaidCash = asyncHandler(async (req, res) => {
@@ -1384,6 +1383,7 @@ class BookingController {
       throw new AppError('Failed to send payment request', 500, 'SEND_PAYMENT_REQUEST_FAILED');
     }
   });
+}
 
 module.exports = new BookingController();
 
