@@ -1290,8 +1290,6 @@ class BookingController {
           .from('payments')
           .insert({
             booking_id: bookingId,
-            salon_id: booking.salon_id,
-            client_id: booking.client_id,
             amount: booking.total_price || 0,
             payment_status: 'paid',
             payment_method: 'cash',
@@ -1399,8 +1397,6 @@ class BookingController {
         console.log(`💳 Creating new payment record for booking ${bookingId}`);
         const paymentData = {
           booking_id: bookingId,
-          salon_id: booking.salon_id,
-          client_id: booking.client_id,
           amount: amount,
           payment_status: 'requested',
           payment_method: 'ideal', // Default, client can choose
