@@ -548,7 +548,6 @@ class PaymentController {
         .from('payments')
         .update({ 
             status: 'completed',
-          updated_at: new Date().toISOString()
         })
           .eq('id', existingPayment.id);
 
@@ -597,7 +596,6 @@ class PaymentController {
         .from('payments')
         .update({ 
           status: 'failed',
-          updated_at: new Date().toISOString()
         })
         .eq('stripe_payment_intent_id', paymentIntent.id);
 

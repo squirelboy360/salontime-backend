@@ -70,7 +70,6 @@ class WebhookController {
         .update({
           status: 'completed',
           stripe_payment_intent_id: session.payment_intent,
-          updated_at: new Date().toISOString(),
         })
         .eq('booking_id', bookingId);
 
@@ -86,7 +85,6 @@ class WebhookController {
         .from('bookings')
         .update({
           status: 'confirmed',
-          updated_at: new Date().toISOString(),
         })
         .eq('id', bookingId)
         .eq('status', 'pending'); // Only update if still pending
@@ -120,7 +118,6 @@ class WebhookController {
         .from('payments')
         .update({
           status: 'completed',
-          updated_at: new Date().toISOString(),
         })
         .eq('stripe_payment_intent_id', paymentIntent.id);
 
@@ -148,7 +145,6 @@ class WebhookController {
         .from('payments')
         .update({
           status: 'failed',
-          updated_at: new Date().toISOString(),
         })
         .eq('stripe_payment_intent_id', paymentIntent.id);
 

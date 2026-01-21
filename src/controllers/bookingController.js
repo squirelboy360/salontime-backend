@@ -1277,7 +1277,6 @@ class BookingController {
           .update({
             status: 'paid',
             payment_method: 'cash',
-            updated_at: new Date().toISOString(),
           })
           .eq('id', existingPayment.id);
 
@@ -1546,7 +1545,6 @@ class BookingController {
         .from('payments')
         .update({
           stripe_payment_intent_id: session.id,
-          updated_at: new Date().toISOString(),
         })
         .eq('id', paymentRecord.id);
 
