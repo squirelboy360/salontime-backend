@@ -1484,8 +1484,21 @@ class BookingController {
 
       console.log(`💳 Creating Stripe checkout session: €${amount} for salon: ${stripeAccountId}`);
 
+      // Verify Stripe is configured
+      if (!process.env.STRIPE_SECRET_KEY) {
+        console.error('❌ STRIPE_SECRET_KEY not configured');
+        throw new AppError('Payment system not configured', 500, 'STRIPE_NOT_CONFIGURED');
+      }
+
       // Create Stripe Checkout Session
       const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+      
+      const successUrl = 'salontime://payment-success';
+      const cancelUrl = 'salontime://payment-cancelled';
+      
+      console.log(`💳 Success URL: ${successUrl}`);
+      console.log(`💳 Cancel URL: ${cancelUrl}`);
+      
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ['card', 'ideal'],
         line_items: [{
@@ -1500,8 +1513,8 @@ class BookingController {
           quantity: 1,
         }],
         mode: 'payment',
-        success_url: `${process.env.FRONTEND_URL || 'https://salontime.nl'}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.FRONTEND_URL || 'https://salontime.nl'}/payment-cancelled`,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
         payment_intent_data: {
           application_fee_amount: Math.round(amount * 100 * 0.05), // 5% platform fee
           transfer_data: {
@@ -1545,8 +1558,14 @@ class BookingController {
       if (error instanceof AppError) {
         throw error;
       }
-      console.error('Error creating checkout session:', error);
-      throw new AppError('Failed to create checkout session', 500, 'CHECKOUT_SESSION_FAILED');
+      console.error('❌ Error creating checkout session:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        type: error.type,
+        code: error.code,
+        param: error.param,
+      });
+      throw new AppError(`Failed to create checkout session: ${error.message}`, 500, 'CHECKOUT_SESSION_FAILED');
     }
   });
 }
