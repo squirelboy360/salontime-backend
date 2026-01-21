@@ -316,12 +316,10 @@ class StripeService {
         case 'payment_intent.succeeded':
           console.log('💳 Payment intent succeeded:', event.data.object.id);
           await this._handlePaymentIntentSucceeded(event.data.object);
-          await this.handlePaymentSucceeded(event.data.object);
           break;
         case 'payment_intent.payment_failed':
           console.log('💳 Payment intent failed:', event.data.object.id);
           await this._handlePaymentIntentFailed(event.data.object);
-          await this.handlePaymentFailed(event.data.object);
           break;
         case 'customer.subscription.created':
           await this.handleSubscriptionCreated(event.data.object);
@@ -417,89 +415,6 @@ class StripeService {
       console.log(`🎉 Updated Stripe account ${account.id} status: ${status}`);
     } catch (error) {
       console.error('Error handling account update webhook:', error);
-    }
-  }
-
-  // Handle successful payments
-  async handlePaymentSucceeded(paymentIntent) {
-    const { supabase } = require('../config/database');
-    
-    try {
-      // Find payment record to get booking_id
-      const { data: payment } = await supabase
-        .from('payments')
-        .select('booking_id')
-        .eq('stripe_payment_intent_id', paymentIntent.id)
-        .single();
-
-      const { error } = await supabase
-        .from('payments')
-        .update({
-          status: 'completed',
-          stripe_charge_id: paymentIntent.latest_charge,
-          processed_at: new Date().toISOString()
-        })
-        .eq('stripe_payment_intent_id', paymentIntent.id);
-
-      if (error) {
-        console.error('Failed to update payment status:', error);
-      } else if (payment && payment.booking_id) {
-        // Also update booking payment_status
-        const { error: bookingError } = await supabase
-          .from('bookings')
-          .update({
-            payment_status: 'paid',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', payment.booking_id);
-        
-        if (bookingError) {
-          console.error('Failed to update booking payment status:', bookingError);
-        }
-      }
-    } catch (error) {
-      console.error('Error handling payment success webhook:', error);
-    }
-  }
-
-  // Handle failed payments
-  async handlePaymentFailed(paymentIntent) {
-    const { supabase } = require('../config/database');
-    
-    try {
-      // Find payment record to get booking_id
-      const { data: payment } = await supabase
-        .from('payments')
-        .select('booking_id')
-        .eq('stripe_payment_intent_id', paymentIntent.id)
-        .single();
-
-      const { error } = await supabase
-        .from('payments')
-        .update({
-          status: 'failed',
-          failure_reason: paymentIntent.last_payment_error?.message || 'Payment failed'
-        })
-        .eq('stripe_payment_intent_id', paymentIntent.id);
-
-      if (error) {
-        console.error('Failed to update payment status:', error);
-      } else if (payment && payment.booking_id) {
-        // Also update booking payment_status
-        const { error: bookingError } = await supabase
-          .from('bookings')
-          .update({
-            payment_status: 'pending', // Reset to pending on failure
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', payment.booking_id);
-        
-        if (bookingError) {
-          console.error('Failed to update booking payment status:', bookingError);
-        }
-      }
-    } catch (error) {
-      console.error('Error handling payment failure webhook:', error);
     }
   }
 
@@ -766,77 +681,58 @@ class StripeService {
   async _handleCheckoutSessionCompleted(session) {
     const { supabaseAdmin } = require('../config/database');
     console.log(`💳 Processing checkout session: ${session.id}`);
-    console.log(`💳 Payment status: ${session.payment_status}`);
-    console.log(`💳 Payment intent: ${session.payment_intent}`);
-    console.log(`💳 Amount total: ${session.amount_total}`);
-    console.log(`💳 Metadata:`, session.metadata);
-
+    
     const bookingId = session.metadata?.booking_id;
-
     if (!bookingId) {
-      console.error('❌ No booking_id in session metadata');
+      console.error('❌ CRITICAL: No booking_id found in metadata for session:', session.id);
       return;
     }
 
     try {
-      // First, check if payment record exists
-      const { data: existingPayment, error: checkError } = await supabaseAdmin
-        .from('payments')
-        .select('*')
-        .eq('booking_id', bookingId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (checkError) {
-        console.error('❌ Error finding payment:', checkError);
-        return;
+      // 1. Get actual payment method details
+      let paymentMethod = 'online';
+      if (session.payment_intent) {
+        try {
+          const pi = await this.stripe.paymentIntents.retrieve(session.payment_intent);
+          if (pi.payment_method) {
+            const pm = await this.stripe.paymentMethods.retrieve(pi.payment_method);
+            paymentMethod = pm.card?.wallet?.type || pm.type || 'card';
+          }
+        } catch (err) {
+          console.log('⚠️ Could not fetch detailed PM info:', err.message);
+          paymentMethod = session.payment_method_types?.[0] || 'online';
+        }
       }
 
-      console.log(`💳 Found existing payment:`, existingPayment);
+      console.log(`💳 Updating DB for booking ${bookingId} with method: ${paymentMethod}`);
 
-      // Update payment status to succeeded
-      const paymentMethod = session.payment_method_types?.[0] === 'card' 
-          ? (session.payment_intent_data?.payment_method_options?.card?.wallet?.type || 'card')
-          : (session.payment_method_types?.[0] || 'online');
-
+      // 2. Update Payment record (Aggressive update)
       const { data: updatedPayment, error: paymentError } = await supabaseAdmin
         .from('payments')
         .update({
-          status: 'succeeded',
+          status: 'completed',
           stripe_payment_intent_id: session.payment_intent,
-          payment_method: paymentMethod, // Store actual method (apple_pay, card, ideal)
+          payment_method: paymentMethod,
           updated_at: new Date().toISOString(),
         })
-        .eq('booking_id', bookingId)
-        .select()
-        .single();
+        .eq('booking_id', bookingId);
 
-      if (paymentError) {
-        console.error('❌ Error updating payment:', paymentError);
-        return;
-      }
+      if (paymentError) console.error('❌ Error updating payment table:', paymentError);
 
-      console.log(`✅ Payment updated to succeeded:`, updatedPayment);
-
-      // Update booking status to confirmed
-      const { data: updatedBooking, error: bookingError } = await supabaseAdmin
+      // 3. Update Booking record
+      const { error: bookingError } = await supabaseAdmin
         .from('bookings')
         .update({
           status: 'confirmed',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', bookingId)
-        .select()
-        .single();
+        .eq('id', bookingId);
 
-      if (bookingError) {
-        console.error('❌ Error updating booking:', bookingError);
-      } else {
-        console.log(`✅ Booking confirmed:`, updatedBooking);
-      }
+      if (bookingError) console.error('❌ Error updating booking table:', bookingError);
+
+      console.log(`✅ Webhook sync complete for booking: ${bookingId}`);
     } catch (error) {
-      console.error('❌ Error handling checkout session:', error);
+      console.error('❌ Fatal error in webhook handler:', error);
     }
   }
 
@@ -851,12 +747,12 @@ class StripeService {
       await supabaseAdmin
         .from('payments')
         .update({
-          status: 'succeeded',
+          status: 'completed',
           updated_at: new Date().toISOString(),
         })
         .eq('stripe_payment_intent_id', paymentIntent.id);
 
-      console.log(`✅ Payment updated to succeeded via payment_intent`);
+      console.log(`✅ Payment updated to completed via payment_intent`);
     } catch (error) {
       console.error('❌ Error handling payment intent:', error);
     }

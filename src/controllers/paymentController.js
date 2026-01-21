@@ -557,20 +557,20 @@ class PaymentController {
         } else {
           console.log(`✅ Payment succeeded and updated: ${paymentIntent.id}`);
           
-          // Also update booking payment_status if payment is linked to a booking
+          // Also update booking status if payment is linked to a booking
           if (existingPayment.booking_id) {
             const { error: bookingError } = await supabase
               .from('bookings')
               .update({
-                payment_status: 'paid',
+                status: 'confirmed',
                 updated_at: new Date().toISOString()
               })
               .eq('id', existingPayment.booking_id);
             
             if (bookingError) {
-              console.error('Failed to update booking payment status:', bookingError);
+              console.error('Failed to update booking status:', bookingError);
             } else {
-              console.log(`✅ Updated booking ${existingPayment.booking_id} payment_status to 'paid'`);
+              console.log(`✅ Updated booking ${existingPayment.booking_id} status to 'confirmed'`);
             }
           }
         }
@@ -605,20 +605,20 @@ class PaymentController {
         console.error('Failed to update payment status:', error);
       }
 
-      // Also update booking payment_status if payment is linked to a booking
+      // Also update booking status if payment is linked to a booking
       if (payment && payment.booking_id) {
         const { error: bookingError } = await supabase
           .from('bookings')
           .update({
-            payment_status: 'pending', // Reset to pending on failure
+            status: 'pending', // Reset to pending on failure
             updated_at: new Date().toISOString()
           })
           .eq('id', payment.booking_id);
         
         if (bookingError) {
-          console.error('Failed to update booking payment status:', bookingError);
+          console.error('Failed to update booking status:', bookingError);
         } else {
-          console.log(`✅ Updated booking ${payment.booking_id} payment_status to 'pending'`);
+          console.log(`✅ Updated booking ${payment.booking_id} status to 'pending'`);
         }
       }
 

@@ -64,11 +64,11 @@ class WebhookController {
     }
 
     try {
-      // Update payment status to succeeded
+      // Update payment status to completed
       const { error: paymentError } = await supabaseAdmin
         .from('payments')
         .update({
-          status: 'succeeded',
+          status: 'completed',
           stripe_payment_intent_id: session.payment_intent,
           updated_at: new Date().toISOString(),
         })
@@ -79,7 +79,7 @@ class WebhookController {
         return;
       }
 
-      console.log(`✅ Payment updated to succeeded for booking: ${bookingId}`);
+      console.log(`✅ Payment updated to completed for booking: ${bookingId}`);
 
       // Update booking status to confirmed if needed
       const { error: bookingError } = await supabaseAdmin
@@ -119,12 +119,12 @@ class WebhookController {
       await supabaseAdmin
         .from('payments')
         .update({
-          status: 'succeeded',
+          status: 'completed',
           updated_at: new Date().toISOString(),
         })
         .eq('stripe_payment_intent_id', paymentIntent.id);
 
-      console.log(`✅ Payment updated to succeeded via payment_intent`);
+      console.log(`✅ Payment updated to completed via payment_intent`);
     } catch (error) {
       console.error('❌ Error handling payment intent:', error);
     }
