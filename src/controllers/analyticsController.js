@@ -20,10 +20,14 @@ class AnalyticsController {
       }
 
       const salonId = salon.id;
+      console.log('📊 Fetching analytics for salon:', salonId, 'owner:', req.user.id);
+      
       const { period = '30' } = req.query; // Default to last 30 days
       const daysAgo = parseInt(period);
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - daysAgo);
+      
+      console.log('📅 Date range:', startDate.toISOString(), 'to', new Date().toISOString());
 
       // Fetch all analytics data in parallel
       const [
@@ -116,9 +120,11 @@ class AnalyticsController {
       .gte('created_at', startDate.toISOString());
 
     if (error) {
-      console.error('Bookings query error:', error);
+      console.error('❌ Bookings query error:', error);
       return { total: 0, byStatus: {}, timeline: [] };
     }
+
+    console.log(`📋 Found ${bookings?.length || 0} bookings for salon ${salonId}`);
 
     // Count by status
     const byStatus = {
@@ -156,9 +162,11 @@ class AnalyticsController {
       .gte('viewed_at', startDate.toISOString());
 
     if (error) {
-      console.error('Views query error:', error);
+      console.error('❌ Views query error:', error);
       return { total: 0, unique: 0, timeline: [] };
     }
+
+    console.log(`👁️ Found ${views?.length || 0} views for salon ${salonId}`);
 
     // Count unique users
     const uniqueUsers = new Set(views?.filter(v => v.user_id).map(v => v.user_id));
@@ -183,9 +191,11 @@ class AnalyticsController {
       .eq('salon_id', salonId);
 
     if (error) {
-      console.error('Favorites query error:', error);
+      console.error('❌ Favorites query error:', error);
       return { total: 0, recent: [] };
     }
+
+    console.log(`❤️ Found ${count || 0} favorites for salon ${salonId}`);
 
     // Get 5 most recent favorites
     const recent = (favorites || [])
