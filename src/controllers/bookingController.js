@@ -2,6 +2,7 @@ const supabaseService = require('../services/supabaseService');
 const emailService = require('../services/emailService');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const { supabase, supabaseAdmin, getAuthenticatedClient } = require('../config/database');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 class BookingController {
   // Create new booking

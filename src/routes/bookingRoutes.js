@@ -23,5 +23,8 @@ router.patch('/:bookingId/cancel', bookingController.cancelBookingAsSalonOwner);
 router.post('/:bookingId/mark-paid-cash', bookingController.markAsPaidCash);
 router.post('/:bookingId/request-payment', bookingController.sendPaymentRequest);
 
+// Client payment routes
+router.post('/:bookingId/create-payment-intent', bookingController.createPaymentIntent);
+
 module.exports = router;
 
