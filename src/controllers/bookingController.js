@@ -312,7 +312,7 @@ class BookingController {
 
     try {
       // Get user's salon
-      const { data: salon, error: salonError } = await supabase
+      const { data: salon, error: salonError } = await supabaseAdmin
         .from('salons')
         .select('id')
         .eq('owner_id', req.user.id)
@@ -322,12 +322,14 @@ class BookingController {
         throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
       }
 
-      let query = supabase
+      console.log(`📋 Fetching bookings for salon: ${salon.id}, status: ${status || 'all'}, date: ${date || 'all'}`);
+
+      let query = supabaseAdmin
         .from('bookings')
         .select(`
           *,
           services(*),
-          user_profiles!client_id(*),
+          user_profiles!bookings_client_id_fkey(id, first_name, last_name, phone, avatar_url),
           staff(*),
           payments(*)
         `)
@@ -347,8 +349,11 @@ class BookingController {
       const { data: bookings, error } = await query;
 
       if (error) {
+        console.error('❌ Failed to fetch salon bookings:', error);
         throw new AppError('Failed to fetch salon bookings', 500, 'SALON_BOOKINGS_FETCH_FAILED');
       }
+
+      console.log(`✅ Found ${bookings?.length || 0} bookings for salon ${salon.id}`);
 
       res.status(200).json({
         success: true,
