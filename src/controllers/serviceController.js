@@ -1,5 +1,5 @@
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
-const { supabase, supabaseAdmin } = require('../config/database');
+const { supabase } = require('../config/database');
 
 class ServiceController {
   // Get all services for a salon
@@ -57,34 +57,22 @@ class ServiceController {
   // Create a new service
   createService = asyncHandler(async (req, res) => {
     const { name, description, price, duration, category_id, is_active = true } = req.body;
-    
-    // Get user's salon
-    const { data: salon, error: salonError } = await supabase
-      .from('salons')
-      .select('id')
-      .eq('owner_id', req.user.id)
-      .single();
+    const salonId = req.user.salon_id;
 
-    if (salonError || !salon) {
+    if (!salonId) {
       throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
     }
 
-    const salonId = salon.id;
-
     try {
-      // Convert empty string category_id to null
-      const categoryIdValue = category_id && category_id.trim() !== '' ? category_id : null;
-
-      // Use admin client to bypass RLS (salon owner is authenticated and owns the salon)
-      const { data: service, error } = await supabaseAdmin
+      const { data: service, error } = await supabase
         .from('services')
         .insert({
           salon_id: salonId,
           name,
-          description: description || null,
+          description,
           price: parseFloat(price),
           duration: parseInt(duration),
-          category_id: categoryIdValue,
+          category_id,
           is_active
         })
         .select(`
@@ -94,8 +82,7 @@ class ServiceController {
         .single();
 
       if (error) {
-        console.error('Service creation error:', error);
-        throw new AppError(`Failed to create service: ${error.message}`, 500, 'CREATE_FAILED');
+        throw new AppError('Failed to create service', 500, 'CREATE_FAILED');
       }
 
       res.status(201).json({
@@ -104,11 +91,10 @@ class ServiceController {
       });
 
     } catch (error) {
-      console.error('Service creation catch error:', error);
       if (error instanceof AppError) {
         throw error;
       }
-      throw new AppError(`Failed to create service: ${error.message || 'Unknown error'}`, 500, 'CREATE_FAILED');
+      throw new AppError('Failed to create service', 500, 'CREATE_FAILED');
     }
   });
 
@@ -116,19 +102,11 @@ class ServiceController {
   updateService = asyncHandler(async (req, res) => {
     const { serviceId } = req.params;
     const { name, description, price, duration, category_id, is_active } = req.body;
-    
-    // Get user's salon
-    const { data: salon, error: salonError } = await supabase
-      .from('salons')
-      .select('id')
-      .eq('owner_id', req.user.id)
-      .single();
+    const salonId = req.user.salon_id;
 
-    if (salonError || !salon) {
+    if (!salonId) {
       throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
     }
-
-    const salonId = salon.id;
 
     try {
       const updateData = {};
@@ -170,23 +148,14 @@ class ServiceController {
   // Delete a service
   deleteService = asyncHandler(async (req, res) => {
     const { serviceId } = req.params;
-    
-    // Get user's salon
-    const { data: salon, error: salonError } = await supabase
-      .from('salons')
-      .select('id')
-      .eq('owner_id', req.user.id)
-      .single();
+    const salonId = req.user.salon_id;
 
-    if (salonError || !salon) {
+    if (!salonId) {
       throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
     }
 
-    const salonId = salon.id;
-
     try {
-      // Use admin client to bypass RLS (salon owner is authenticated and owns the salon)
-      const { error } = await supabaseAdmin
+      const { error } = await supabase
         .from('services')
         .delete()
         .eq('id', serviceId)
