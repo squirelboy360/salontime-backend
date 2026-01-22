@@ -59,10 +59,23 @@ exports.updateBusinessHours = async (req, res) => {
         });
       }
 
-      if (typeof hours !== 'object' || !hours.opening || !hours.closing) {
+      if (typeof hours !== 'object') {
         return res.status(400).json({
           success: false,
           message: `Invalid hours format for ${day}`
+        });
+      }
+
+      // If day is closed, opening/closing times are optional
+      if (hours.closed === true) {
+        continue; // Skip validation for closed days
+      }
+
+      // If day is not closed, opening and closing are required
+      if (!hours.opening || !hours.closing) {
+        return res.status(400).json({
+          success: false,
+          message: `Opening and closing times are required for ${day} when not closed`
         });
       }
 
