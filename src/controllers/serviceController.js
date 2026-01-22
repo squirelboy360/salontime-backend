@@ -57,22 +57,34 @@ class ServiceController {
   // Create a new service
   createService = asyncHandler(async (req, res) => {
     const { name, description, price, duration, category_id, is_active = true } = req.body;
-    const salonId = req.user.salon_id;
 
-    if (!salonId) {
+    // Get user's salon
+    const { data: salon, error: salonError } = await supabase
+      .from('salons')
+      .select('id')
+      .eq('owner_id', req.user.id)
+      .single();
+
+    if (salonError || !salon) {
       throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
     }
 
+    const salonId = salon.id;
+
     try {
+      // Convert empty string category_id to null
+      const finalCategoryId = (category_id && category_id.trim() !== '') ? category_id : null;
+      const finalDescription = (description && description.trim() !== '') ? description : null;
+      
       const { data: service, error } = await supabase
         .from('services')
         .insert({
           salon_id: salonId,
           name,
-          description,
+          description: finalDescription,
           price: parseFloat(price),
           duration: parseInt(duration),
-          category_id,
+          category_id: finalCategoryId,
           is_active
         })
         .select(`
@@ -102,19 +114,31 @@ class ServiceController {
   updateService = asyncHandler(async (req, res) => {
     const { serviceId } = req.params;
     const { name, description, price, duration, category_id, is_active } = req.body;
-    const salonId = req.user.salon_id;
 
-    if (!salonId) {
+    // Get user's salon
+    const { data: salon, error: salonError } = await supabase
+      .from('salons')
+      .select('id')
+      .eq('owner_id', req.user.id)
+      .single();
+
+    if (salonError || !salon) {
       throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
     }
+
+    const salonId = salon.id;
 
     try {
       const updateData = {};
       if (name !== undefined) updateData.name = name;
-      if (description !== undefined) updateData.description = description;
+      if (description !== undefined) {
+        updateData.description = (description && description.trim() !== '') ? description : null;
+      }
       if (price !== undefined) updateData.price = parseFloat(price);
       if (duration !== undefined) updateData.duration = parseInt(duration);
-      if (category_id !== undefined) updateData.category_id = category_id;
+      if (category_id !== undefined) {
+        updateData.category_id = (category_id && category_id.trim() !== '') ? category_id : null;
+      }
       if (is_active !== undefined) updateData.is_active = is_active;
 
       const { data: service, error } = await supabase
@@ -148,11 +172,19 @@ class ServiceController {
   // Delete a service
   deleteService = asyncHandler(async (req, res) => {
     const { serviceId } = req.params;
-    const salonId = req.user.salon_id;
 
-    if (!salonId) {
+    // Get user's salon
+    const { data: salon, error: salonError } = await supabase
+      .from('salons')
+      .select('id')
+      .eq('owner_id', req.user.id)
+      .single();
+
+    if (salonError || !salon) {
       throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
     }
+
+    const salonId = salon.id;
 
     try {
       const { error } = await supabase

@@ -1,21 +1,17 @@
-const { Pool } = require('pg');
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-});
+const { supabase } = require('../config/database');
 
 // Get salon's business hours
 exports.getBusinessHours = async (req, res) => {
   const { salonId } = req.params;
 
   try {
-    const result = await pool.query(
-      'SELECT business_hours FROM salons WHERE id = $1',
-      [salonId]
-    );
+    const { data: salon, error } = await supabase
+      .from('salons')
+      .select('business_hours')
+      .eq('id', salonId)
+      .single();
 
-    if (result.rows.length === 0) {
+    if (error || !salon) {
       return res.status(404).json({
         success: false,
         message: 'Salon not found'
@@ -25,7 +21,7 @@ exports.getBusinessHours = async (req, res) => {
     res.json({
       success: true,
       data: {
-        business_hours: result.rows[0].business_hours || {}
+        business_hours: salon.business_hours || {}
       }
     });
   } catch (error) {
@@ -81,15 +77,17 @@ exports.updateBusinessHours = async (req, res) => {
     }
 
     // Update business hours
-    const result = await pool.query(
-      `UPDATE salons 
-       SET business_hours = $1, updated_at = NOW() 
-       WHERE id = $2 
-       RETURNING business_hours`,
-      [JSON.stringify(business_hours), salonId]
-    );
+    const { data: updatedSalon, error: updateError } = await supabase
+      .from('salons')
+      .update({ 
+        business_hours: business_hours,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', salonId)
+      .select('business_hours')
+      .single();
 
-    if (result.rows.length === 0) {
+    if (updateError || !updatedSalon) {
       return res.status(404).json({
         success: false,
         message: 'Salon not found'
@@ -100,7 +98,7 @@ exports.updateBusinessHours = async (req, res) => {
       success: true,
       message: 'Business hours updated successfully',
       data: {
-        business_hours: result.rows[0].business_hours
+        business_hours: updatedSalon.business_hours
       }
     });
   } catch (error) {

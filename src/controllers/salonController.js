@@ -1531,9 +1531,18 @@ class SalonController {
 
   // Delete salon image
   deleteSalonImage = asyncHandler(async (req, res) => {
-    const { imageUrl } = req.body;
+    // Try body first, then query params, then check raw body
+    let imageUrl = req.body?.imageUrl || req.query?.imageUrl;
+    
+    // If still not found, try parsing body manually (some DELETE requests don't parse body automatically)
+    if (!imageUrl && req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+      imageUrl = req.body.imageUrl;
+    }
+    
+    // Log for debugging
+    console.log('🗑️ Delete image request - body:', req.body, 'query:', req.query, 'imageUrl:', imageUrl);
 
-    if (!imageUrl) {
+    if (!imageUrl || (typeof imageUrl === 'string' && imageUrl.trim() === '')) {
       throw new AppError('Image URL is required', 400, 'MISSING_IMAGE_URL');
     }
 
