@@ -488,6 +488,31 @@ class SalonController {
         const allServiceFilters = [...serviceList, ...searchAsService];
 
         if (allServiceFilters.length > 0) {
+          // First, try to find matching category IDs from service_categories table
+          const serviceNames = allServiceFilters.map(s => s.toLowerCase().trim());
+          const matchingSalonIds = new Set();
+          
+          // Query service_categories directly to find matching categories
+          const { data: matchingCategories, error: categoryError } = await supabase
+            .from('service_categories')
+            .select('id, name, slug')
+            .eq('is_active', true);
+          
+          const categoryIds = new Set();
+          if (!categoryError && matchingCategories) {
+            matchingCategories.forEach(cat => {
+              const catName = (cat.name || '').toLowerCase();
+              const catSlug = (cat.slug || '').toLowerCase();
+              
+              serviceNames.forEach(filterName => {
+                if (catName.includes(filterName) || catSlug.includes(filterName)) {
+                  categoryIds.add(cat.id);
+                  console.log(`✅ Category match: "${cat.name}" (slug: ${catSlug}) matches "${filterName}"`);
+                }
+              });
+            });
+          }
+          
           // Fetch all active services to find matching salons
           const { data: allServices, error: servicesError } = await supabase
             .from('services')
@@ -499,23 +524,25 @@ class SalonController {
           }
 
           if (!servicesError && allServices) {
-            const serviceNames = allServiceFilters.map(s => s.toLowerCase().trim());
-            const matchingSalonIds = new Set();
-            
             console.log(`🔍 Service filtering: Looking for ${serviceNames.join(', ')} in ${allServices.length} services`);
+            console.log(`🔍 Found ${categoryIds.size} matching category IDs: ${Array.from(categoryIds).join(', ')}`);
             
             allServices.forEach(svc => {
               const svcName = (svc.name || '').toLowerCase();
               const svcCategory = (svc.service_categories?.name || '').toLowerCase();
               const svcCategorySlug = (svc.service_categories?.slug || '').toLowerCase();
               
+              // Check if service's category_id matches any of our found category IDs
+              const matchesCategoryId = svc.category_id && categoryIds.has(svc.category_id);
+              
               serviceNames.forEach(filterName => {
-                // Check service name, category name, or category slug
+                // Check service name, category name, category slug, or category ID match
                 if (svcName.includes(filterName) || 
                     svcCategory.includes(filterName) || 
-                    svcCategorySlug.includes(filterName)) {
+                    svcCategorySlug.includes(filterName) ||
+                    matchesCategoryId) {
                   matchingSalonIds.add(svc.salon_id);
-                  console.log(`✅ Match found: Service "${svc.name}" (category: ${svc.service_categories?.name || 'none'}, slug: ${svcCategorySlug || 'none'}) matches "${filterName}" for salon ${svc.salon_id}`);
+                  console.log(`✅ Match found: Service "${svc.name}" (category: ${svc.service_categories?.name || 'none'}, slug: ${svcCategorySlug || 'none'}, category_id: ${svc.category_id}) matches "${filterName}" for salon ${svc.salon_id}`);
                 }
               });
             });

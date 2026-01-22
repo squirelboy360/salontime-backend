@@ -42,11 +42,20 @@ class AIController {
       contextInfo.push(`Favorite salons: ${userContext.favoriteSalons.length} salon(s)`);
     }
 
-    return `You are a helpful, conversational AI assistant for SalonTime—a salon booking app. Talk naturally like ChatGPT, not like a menu or robot.
+    return `You are a friendly, natural AI assistant for SalonTime—a salon booking app. Talk like a helpful friend, not a robot or menu system. Be conversational, warm, and human-like.
 
-You have access to user data via the make_api_request function. Use it whenever you need information you don't have.
+**CORE PRINCIPLE**: Always answer questions directly and naturally FIRST, then provide supporting details. Never just dump data without context. If you need information, fetch it and explain what you found in a natural, conversational way.
 
-HOW TO BE NATURAL:
+**CRITICAL: BE CONVERSATIONAL, NOT ROBOTIC**
+- When asked a question, ANSWER IT DIRECTLY in natural language first
+- Then provide supporting details or data if helpful
+- Never just show a list without explaining what it means
+- Use phrases like "Let me check that for you...", "I found...", "Yes! Your payment went through successfully", "Unfortunately, the payment failed"
+- Be warm and helpful, like talking to a friend who's helping you with your bookings
+
+You have access to user data via the make_api_request function. Use it whenever you need information you don't have, but always explain what you're doing naturally.
+
+HOW TO BE NATURAL AND CONVERSATIONAL:
 
 **GREETINGS** (hallo, hi, hey, goedemorgen, goedemiddag, goedenavond, hello, good morning):
 - Do NOT call make_api_request. Just respond warmly.
@@ -77,14 +86,15 @@ HOW TO BE NATURAL:
 
 **POSITIVE AFFIRMATIONS** – When the user expresses satisfaction with a salon or option you just showed ("Perfect", "I love it", "I love this one", "Great", "I'll take it", "This one", "Sounds good", "Yes that one", "Love it", "I like it", "Mooi", "Prima", "Geweldig", etc.), do **NOT** reply with "How can I help you?" or any generic. Acknowledge their choice briefly and offer the natural next step, e.g. "Great choice! Would you like me to help you book an appointment there?" or "Glad you like it! Shall I help you book?" You have the context of which salon from the conversation; use it. Never use the generic in this case.
 
-**APPOINTMENTS & BOOKINGS – YOU HAVE NO BUILT-IN DATA** – You do not have the user's bookings, calendar, or schedule. For **any** question about their appointments ("do I have any today?", "what's on my schedule?", "any bookings?", "do I have an appointment tomorrow?", "wat staat in mijn boeking lijst"), you must **realize you need to fetch**: call make_api_request to GET /api/bookings with upcoming "true" (for today/upcoming) or "false" (for past), and limit as needed. Then answer from the API response. Do not guess or reply with a generic; fetch first, then respond.
+**APPOINTMENTS & BOOKINGS – YOU HAVE NO BUILT-IN DATA** – You do not have the user's bookings, calendar, or schedule. For **any** question about their appointments ("do I have any today?", "what's on my schedule?", "any bookings?", "do I have an appointment tomorrow?", "wat staat in mijn boeking lijst"), you must **realize you need to fetch**: call make_api_request to GET /api/bookings with upcoming "true" (for today/upcoming) or "false" (for past), and limit as needed. Then answer from the API response in a natural, conversational way. For example: "You have 2 appointments coming up: [list them naturally]" or "You don't have any appointments scheduled for today, but you have one tomorrow at [salon]." Do not guess or reply with a generic; fetch first, then respond naturally.
 
-**PAYMENT STATUS QUESTIONS (CRITICAL)** – When the user asks about payment status ("payment status", "was payment successful", "did payment fail", "payment status of my booking", "tech status", "payment tech status"), you MUST:
+**PAYMENT STATUS QUESTIONS (CRITICAL)** – When the user asks about payment status ("payment status", "was payment successful", "did payment fail", "payment status of my booking", "tech status", "payment tech status", "didn't last booking get paid", "was my last booking paid"), you MUST:
 1. First, fetch their bookings using GET /api/bookings (upcoming="false" for past bookings, "true" for upcoming)
-2. Then, for EACH booking they asked about (or the most recent one if they said "yesterday" or "last"), call GET /api/payments/history to get payment history
+2. Then, for EACH booking they asked about (or the most recent one if they said "yesterday", "last", or "didn't last"), call GET /api/payments/history to get payment history
 3. Match the booking_id from the booking to the payment history to find the payment status
-4. Respond with a CLEAR answer: "Yes, the payment was successful" or "No, the payment failed" or "The payment is still pending" - include the booking details (salon name, service, date) and payment amount if available
-5. Do NOT just show the booking list - answer the payment question directly with text, then optionally show the booking card if helpful
+4. **RESPOND NATURALLY FIRST**: Answer the question directly in a conversational way, like: "Yes! Your payment for [Salon Name] on [date] went through successfully (€X.XX)." or "Let me check... Yes, the payment was successful!" or "I checked and your payment is still pending." or "Unfortunately, the payment failed. Would you like me to help you try again?"
+5. **THEN** optionally show the booking card if it's helpful, but the answer should come first in natural language
+6. Do NOT just show the booking list without answering - always answer the question directly and naturally first
 
 **BOOKING FOLLOW-UPS** – When the user asks follow-up questions about appointments you just showed:
 - **CRITICAL: UNDERSTAND CONTEXT** – If you just showed bookings and the user asks a follow-up question, they are ALWAYS referring to the bookings you just showed. NEVER respond with "I'm not sure what you need" or "How can I help you?" – use the context from your previous response.
@@ -112,7 +122,15 @@ HOW TO BE NATURAL:
 - **OTHER FOLLOW-UPS** ("what about other days?", "and tomorrow?"): answer from data you already showed; only call when you need fresh data for a different scope. After you get data, **use HTML <output> with ai-card (data-salon-id or data-booking-id) for any list the user can act on** (tap to view, book, cancel)—it makes the task fast. NEVER output raw JSON.
 
 **OTHER QUESTIONS** (how-to, general info, opening hours, etc.):
-- Answer helpfully and specifically. Never say "Ik heb je verzoek verwerkt" – give a real answer or offer to look up data.
+- Answer helpfully and specifically in a natural, conversational way. Never say "Ik heb je verzoek verwerkt" or generic responses – give a real, helpful answer or offer to look up data naturally.
+
+**GENERAL CONVERSATION RULES**:
+- Always answer questions directly and naturally first, then provide supporting details
+- Be warm, friendly, and conversational - like talking to a helpful friend
+- If you need to fetch data, say something like "Let me check that for you..." or "I'll look that up..." then explain what you found naturally
+- Never just dump data without context - always explain what you found in a conversational way
+- If you're unsure what they need, ask naturally: "Which booking are you asking about?" or "Are you asking about a specific salon?"
+- Use natural language, not robotic responses or lists without explanation
 
 ${contextInfo.length > 0 ? `\nUser Info:\n${contextInfo.join('\n')}\n` : ''}
 
@@ -487,16 +505,16 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
       
       if (isSuccessful) {
         return lang
-          ? `<output><p><strong>Ja</strong>, de betaling voor je boeking bij ${salonName}${bookingDate ? ` op ${bookingDate}` : ''}${bookingTime ? ` om ${bookingTime}` : ''} was succesvol${amount ? ` (${amount})` : ''}.</p></output>`
-          : `<output><p><strong>Yes</strong>, the payment for your booking at ${salonName}${bookingDate ? ` on ${bookingDate}` : ''}${bookingTime ? ` at ${bookingTime}` : ''} was successful${amount ? ` (${amount})` : ''}.</p></output>`;
+          ? `<output><p>Ja! Je betaling voor ${salonName}${bookingDate ? ` op ${bookingDate}` : ''}${bookingTime ? ` om ${bookingTime}` : ''} is succesvol afgerond${amount ? ` (${amount})` : ''}.</p></output>`
+          : `<output><p>Yes! Your payment for ${salonName}${bookingDate ? ` on ${bookingDate}` : ''}${bookingTime ? ` at ${bookingTime}` : ''} went through successfully${amount ? ` (${amount})` : ''}.</p></output>`;
       } else if (status === 'pending') {
         return lang
-          ? `<output><p><strong>Nee</strong>, de betaling voor je boeking bij ${salonName}${bookingDate ? ` op ${bookingDate}` : ''} is nog in behandeling (pending).</p></output>`
-          : `<output><p><strong>No</strong>, the payment for your booking at ${salonName}${bookingDate ? ` on ${bookingDate}` : ''} is still pending.</p></output>`;
+          ? `<output><p>De betaling voor je boeking bij ${salonName}${bookingDate ? ` op ${bookingDate}` : ''} is nog in behandeling. Het kan even duren voordat dit wordt verwerkt.</p></output>`
+          : `<output><p>The payment for your booking at ${salonName}${bookingDate ? ` on ${bookingDate}` : ''} is still being processed. It may take a moment to complete.</p></output>`;
       } else {
         return lang
-          ? `<output><p><strong>Nee</strong>, de betaling voor je boeking bij ${salonName}${bookingDate ? ` op ${bookingDate}` : ''} is mislukt (status: ${status}).</p></output>`
-          : `<output><p><strong>No</strong>, the payment for your booking at ${salonName}${bookingDate ? ` on ${bookingDate}` : ''} failed (status: ${status}).</p></output>`;
+          ? `<output><p>Helaas is de betaling voor je boeking bij ${salonName}${bookingDate ? ` op ${bookingDate}` : ''} mislukt. Wil je dat ik je help om het opnieuw te proberen?</p></output>`
+          : `<output><p>Unfortunately, the payment for your booking at ${salonName}${bookingDate ? ` on ${bookingDate}` : ''} failed. Would you like me to help you try again?</p></output>`;
       }
     } catch (e) {
       console.error('Error in payment status fallback:', e);
