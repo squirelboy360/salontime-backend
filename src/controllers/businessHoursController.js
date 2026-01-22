@@ -1,4 +1,4 @@
-const { supabase } = require('../config/database');
+const { supabase, getAuthenticatedClient } = require('../config/database');
 
 // Get salon's business hours
 exports.getBusinessHours = async (req, res) => {
