@@ -5,6 +5,9 @@
 -- STEP 1: Add owner_reply field to reviews table
 -- =============================================
 
+-- Ensure updated_at column exists (it should from CREATE TABLE, but ensure it's there)
+ALTER TABLE public.reviews ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
 ALTER TABLE public.reviews ADD COLUMN IF NOT EXISTS owner_reply TEXT;
 ALTER TABLE public.reviews ADD COLUMN IF NOT EXISTS owner_reply_at TIMESTAMP WITH TIME ZONE;
 
