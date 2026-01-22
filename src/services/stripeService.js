@@ -187,14 +187,26 @@ class StripeService {
       }
 
       await supabaseAdmin.from('payments').update({
-        status: 'completed',
+        status: 'succeeded',
         stripe_payment_intent_id: session.payment_intent,
         payment_method: paymentMethod,
       }).eq('booking_id', bookingId);
 
-      await supabaseAdmin.from('bookings').update({
-        status: 'confirmed',
-      }).eq('id', bookingId);
+      // Only update booking status if it's currently 'pending'
+      const { data: currentBooking } = await supabaseAdmin
+        .from('bookings')
+        .select('status')
+        .eq('id', bookingId)
+        .single();
+
+      if (currentBooking && currentBooking.status === 'pending') {
+        await supabaseAdmin.from('bookings').update({
+          status: 'confirmed',
+        }).eq('id', bookingId);
+        console.log(`📅 Booking ${bookingId} confirmed`);
+      } else {
+        console.log(`📅 Booking ${bookingId} already in status: ${currentBooking?.status}, skipping confirm`);
+      }
 
       console.log(`✅ Webhook sync complete for booking: ${bookingId}`);
     } catch (error) {
@@ -209,9 +221,9 @@ class StripeService {
 
     try {
       await supabaseAdmin.from('payments').update({
-        status: 'completed',
+        status: 'succeeded',
       }).eq('stripe_payment_intent_id', paymentIntent.id);
-      console.log(`✅ Payment updated to completed via payment_intent`);
+      console.log(`✅ Payment updated to succeeded via payment_intent`);
     } catch (error) {
       console.error('❌ Error in payment intent handler:', error);
     }
