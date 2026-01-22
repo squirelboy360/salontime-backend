@@ -1276,8 +1276,8 @@ class BookingController {
           .from('payments')
           .update({
             status: 'paid',
-            payment_method: 'cash',
-          })
+            payment_method: 'cash'
+        })
           .eq('id', existingPayment.id);
 
         if (updateError) {
@@ -1382,8 +1382,8 @@ class BookingController {
           .from('payments')
           .update({
             status: 'pending', 
-            amount: amount,
-          })
+            amount: amount
+        })
           .eq('id', existingPayment.id);
 
         if (updateError) {
@@ -1544,7 +1544,7 @@ class BookingController {
       await supabaseAdmin
         .from('payments')
         .update({
-          stripe_payment_intent_id: session.id,
+          stripe_payment_intent_id: session.id
         })
         .eq('id', paymentRecord.id);
 

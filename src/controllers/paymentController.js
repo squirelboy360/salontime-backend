@@ -122,8 +122,7 @@ class PaymentController {
       const { error } = await supabase
         .from('payments')
         .update({ 
-          status: paymentIntent.status,
-          updated_at: new Date().toISOString()
+          status: paymentIntent.status
         })
         .eq('stripe_payment_intent_id', paymentIntentId)
         .eq('user_id', userId);
@@ -529,9 +528,8 @@ class PaymentController {
               .from('payments')
               .update({
                 stripe_payment_intent_id: paymentIntent.id,
-                status: 'completed',
-                updated_at: new Date().toISOString()
-              })
+                status: 'completed'
+        })
               .eq('booking_id', booking.id)
               .select()
               .single();
@@ -547,7 +545,7 @@ class PaymentController {
         const { error } = await supabase
         .from('payments')
         .update({ 
-            status: 'completed',
+            status: 'completed'
         })
           .eq('id', existingPayment.id);
 
@@ -595,7 +593,7 @@ class PaymentController {
       const { error } = await supabase
         .from('payments')
         .update({ 
-          status: 'failed',
+          status: 'failed'
         })
         .eq('stripe_payment_intent_id', paymentIntent.id);
 
@@ -761,9 +759,8 @@ class PaymentController {
     const { error: updateError } = await supabase
       .from('payments')
       .update({
-        stripe_checkout_session_id: checkoutSession.id,
-        updated_at: new Date().toISOString()
-      })
+        stripe_checkout_session_id: checkoutSession.id
+        })
       .eq('booking_id', bookingId);
 
     if (updateError) {
@@ -797,8 +794,7 @@ class PaymentController {
           status: 'completed',
           stripe_checkout_session_id: session.id,
           stripe_payment_intent_id: session.payment_intent,
-          payment_method: 'card',
-          updated_at: new Date().toISOString()
+          payment_method: 'card'
         })
         .eq('booking_id', booking_id);
 

@@ -69,7 +69,7 @@ class WebhookController {
         .from('payments')
         .update({
           status: 'completed',
-          stripe_payment_intent_id: session.payment_intent,
+          stripe_payment_intent_id: session.payment_intent
         })
         .eq('booking_id', bookingId);
 
@@ -117,7 +117,7 @@ class WebhookController {
       await supabaseAdmin
         .from('payments')
         .update({
-          status: 'completed',
+          status: 'completed'
         })
         .eq('stripe_payment_intent_id', paymentIntent.id);
 
@@ -144,7 +144,7 @@ class WebhookController {
       await supabaseAdmin
         .from('payments')
         .update({
-          status: 'failed',
+          status: 'failed'
         })
         .eq('stripe_payment_intent_id', paymentIntent.id);
 
