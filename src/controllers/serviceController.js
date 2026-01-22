@@ -58,6 +58,17 @@ class ServiceController {
   createService = asyncHandler(async (req, res) => {
     const { name, description, price, duration, category_id, is_active = true } = req.body;
 
+    // Validate required fields
+    if (!name || name.trim() === '') {
+      throw new AppError('Service name is required', 400, 'VALIDATION_ERROR');
+    }
+    if (!price || isNaN(parseFloat(price))) {
+      throw new AppError('Valid price is required', 400, 'VALIDATION_ERROR');
+    }
+    if (!duration || isNaN(parseInt(duration)) || parseInt(duration) <= 0) {
+      throw new AppError('Valid duration is required', 400, 'VALIDATION_ERROR');
+    }
+
     // Get user's salon
     const { data: salon, error: salonError } = await supabase
       .from('salons')
@@ -66,21 +77,33 @@ class ServiceController {
       .single();
 
     if (salonError || !salon) {
+      console.error('❌ Salon lookup error:', salonError);
+      console.error('❌ User ID:', req.user.id);
       throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
     }
 
     const salonId = salon.id;
+    console.log('✅ Found salon ID:', salonId, 'for user:', req.user.id);
 
     try {
       // Convert empty string category_id to null
       const finalCategoryId = (category_id && category_id.trim() !== '') ? category_id : null;
       const finalDescription = (description && description.trim() !== '') ? description : null;
       
+      console.log('📝 Creating service with:', {
+        salon_id: salonId,
+        name,
+        price: parseFloat(price),
+        duration: parseInt(duration),
+        category_id: finalCategoryId,
+        is_active
+      });
+      
       const { data: service, error } = await supabase
         .from('services')
         .insert({
           salon_id: salonId,
-          name,
+          name: name.trim(),
           description: finalDescription,
           price: parseFloat(price),
           duration: parseInt(duration),
@@ -94,7 +117,12 @@ class ServiceController {
         .single();
 
       if (error) {
-        throw new AppError('Failed to create service', 500, 'CREATE_FAILED');
+        console.error('❌ Service creation error:', error);
+        console.error('❌ Error code:', error.code);
+        console.error('❌ Error message:', error.message);
+        console.error('❌ Error details:', JSON.stringify(error, null, 2));
+        console.error('❌ Error hint:', error.hint);
+        throw new AppError(`Failed to create service: ${error.message || JSON.stringify(error)}`, 500, 'CREATE_FAILED');
       }
 
       res.status(201).json({
@@ -106,7 +134,9 @@ class ServiceController {
       if (error instanceof AppError) {
         throw error;
       }
-      throw new AppError('Failed to create service', 500, 'CREATE_FAILED');
+      console.error('❌ Service creation unexpected error:', error);
+      console.error('❌ Error stack:', error.stack);
+      throw new AppError(`Failed to create service: ${error.message || JSON.stringify(error)}`, 500, 'CREATE_FAILED');
     }
   });
 
@@ -141,6 +171,9 @@ class ServiceController {
       }
       if (is_active !== undefined) updateData.is_active = is_active;
 
+      console.log('📝 Updating service:', serviceId, 'with data:', updateData);
+      console.log('📝 Salon ID:', salonId);
+      
       const { data: service, error } = await supabase
         .from('services')
         .update(updateData)
@@ -153,6 +186,26 @@ class ServiceController {
         .single();
 
       if (error || !service) {
+        console.error('❌ Service update error:', error);
+        console.error('❌ Service ID:', serviceId, 'Salon ID:', salonId);
+        console.error('❌ Update data:', updateData);
+        if (error) {
+          console.error('❌ Error code:', error.code);
+          console.error('❌ Error message:', error.message);
+          console.error('❌ Error hint:', error.hint);
+          throw new AppError(`Service update failed: ${error.message || JSON.stringify(error)}`, 404, 'SERVICE_NOT_FOUND');
+        }
+        // Check if service exists but doesn't belong to this salon
+        const { data: existingService } = await supabase
+          .from('services')
+          .select('id, salon_id')
+          .eq('id', serviceId)
+          .single();
+        if (existingService) {
+          console.error('❌ Service exists but salon_id mismatch:', existingService.salon_id, 'vs', salonId);
+        } else {
+          console.error('❌ Service does not exist:', serviceId);
+        }
         throw new AppError('Service not found or update failed', 404, 'SERVICE_NOT_FOUND');
       }
 
