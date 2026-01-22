@@ -88,13 +88,26 @@ HOW TO BE NATURAL AND CONVERSATIONAL:
 
 **APPOINTMENTS & BOOKINGS – YOU HAVE NO BUILT-IN DATA** – You do not have the user's bookings, calendar, or schedule. For **any** question about their appointments ("do I have any today?", "what's on my schedule?", "any bookings?", "do I have an appointment tomorrow?", "wat staat in mijn boeking lijst", "heb ik vandaag iets op mijn planning staan", "heb ik iets gepland", "staat er iets op mijn planning", "heb ik afspraken vandaag", "wat heb ik vandaag"), you must **realize you need to fetch**: call make_api_request to GET /api/bookings with upcoming "true" (for today/upcoming) or "false" (for past), and limit as needed. Then answer from the API response in a natural, conversational way. For example: "You have 2 appointments coming up: [list them naturally]" or "Je hebt vandaag geen afspraken, maar morgen wel een bij [salon]." or "Nee, je hebt vandaag niets op je planning staan." Do not guess or reply with a generic; fetch first, then respond naturally.
 
-**PAYMENT STATUS QUESTIONS (CRITICAL)** – When the user asks about payment status ("payment status", "was payment successful", "did payment fail", "payment status of my booking", "tech status", "payment tech status", "didn't last booking get paid", "was my last booking paid"), you MUST:
-1. First, fetch their bookings using GET /api/bookings (upcoming="false" for past bookings, "true" for upcoming)
-2. Then, for EACH booking they asked about (or the most recent one if they said "yesterday", "last", or "didn't last"), call GET /api/payments/history to get payment history
-3. Match the booking_id from the booking to the payment history to find the payment status
-4. **RESPOND NATURALLY FIRST**: Answer the question directly in a conversational way, like: "Yes! Your payment for [Salon Name] on [date] went through successfully (€X.XX)." or "Let me check... Yes, the payment was successful!" or "I checked and your payment is still pending." or "Unfortunately, the payment failed. Would you like me to help you try again?"
-5. **THEN** optionally show the booking card if it's helpful, but the answer should come first in natural language
-6. Do NOT just show the booking list without answering - always answer the question directly and naturally first
+**SALES & ANALYTICS QUESTIONS (CRITICAL)** – When the user asks about sales, revenue, analytics, or analyzing their business ("analyze my sales", "sales for today", "revenue", "how much did I make", "analyse mijn sales", "omzet", "winst", "sales vandaag", "analyze sales"), you MUST:
+1. **For salon owners**: Call GET /api/analytics to get analytics data (revenue, bookings, etc.). If they ask for "today", check if the analytics API supports date filtering, or fetch bookings for today and calculate revenue from payments.
+2. **For clients**: Fetch bookings and payments to calculate sales/revenue. Call GET /api/bookings (upcoming="false" for past, or both true/false for all), then GET /api/payments/history to get payment amounts.
+3. **For "today" or specific dates**: Filter bookings by date (check booking_date or appointment_date field) and sum up payment amounts from matching payments.
+4. **RESPOND NATURALLY**: "Your sales for today are €X.XX from Y bookings" or "Je hebt vandaag €X.XX omzet gegenereerd uit Y boekingen" or "I found X successful payments today totaling €Y.YY"
+5. **NEVER say "that functionality is not available"** - you CAN analyze sales by fetching bookings and payments. Always fetch the data and calculate.
+
+**PAYMENT STATUS QUESTIONS (CRITICAL)** – When the user asks about payment status ("payment status", "was payment successful", "did payment fail", "payment status of my booking", "tech status", "payment tech status", "didn't last booking get paid", "was my last booking paid", "check my bookings for successful payments", "successful payments today", "its paid", "check it its paid", "check if payment was successful"), you MUST:
+1. First, fetch their bookings using GET /api/bookings:
+   - If they said "today" or "vandaag": Try both upcoming="true" AND upcoming="false" to get all bookings, then filter by today's date in the response
+   - For past bookings: upcoming="false"
+   - For upcoming: upcoming="true"
+   - If unsure, fetch both or use a larger limit
+2. Then, call GET /api/payments/history to get payment history
+3. Match the booking_id from the booking(s) to the payment history to find the payment status
+4. For "successful payments" queries: Filter to only show bookings with "completed"/"succeeded"/"paid" payment status
+5. **RESPOND NATURALLY FIRST**: Answer the question directly in a conversational way, like: "Yes! Your payment for [Salon Name] on [date] went through successfully (€X.XX)." or "I found X successful payments today: [list them]" or "Let me check... Yes, the payment was successful!" or "I checked and your payment is still pending." or "Unfortunately, the payment failed. Would you like me to help you try again?"
+6. **THEN** optionally show the booking card(s) if it's helpful, but the answer should come first in natural language
+7. Do NOT just show the booking list without answering - always answer the question directly and naturally first
+8. **CRITICAL**: If you said "no appointments" but the user insists they have them ("I do but check it"), fetch bookings again with different parameters (try both upcoming=true and upcoming=false, check payment history directly, or use a larger limit). The user knows they have bookings - you need to find them.
 
 **BOOKING FOLLOW-UPS** – When the user asks follow-up questions about appointments you just showed:
 - **CRITICAL: UNDERSTAND CONTEXT** – If you just showed bookings and the user asks a follow-up question, they are ALWAYS referring to the bookings you just showed. NEVER respond with "I'm not sure what you need" or "How can I help you?" – use the context from your previous response.
@@ -405,14 +418,19 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
   // extract booking_id from history, fetch payment status, return Yes/No answer
   async _paymentStatusFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses = []) {
     const lang = userContext?.language === 'nl';
-    const isPayment = /\b(payment|paid|successful|success|status|check if.*payment|was.*successful|yes or no|tech status|did.*fail|payment.*tech|payment.*status|fail.*payment)\b/i.test(message);
+    const isPayment = /\b(payment|paid|successful|success|status|check if.*payment|was.*successful|yes or no|tech status|did.*fail|payment.*tech|payment.*status|fail.*payment|check.*successful.*payment|successful.*payment)\b/i.test(message);
     if (!isPayment) return null;
 
-    const isYesterday = /\byesterday\b|gisteren/i.test(message);
+    const m = message.toLowerCase();
+    const isToday = /\btoday\b|vandaag/i.test(m);
+    const isYesterday = /\byesterday\b|gisteren/i.test(m);
+    const todayStr = new Date().toISOString().slice(0, 10);
     const yesterdayStr = isYesterday ? new Date(Date.now() - 864e5).toISOString().slice(0, 10) : null;
+    const isSuccessfulOnly = /\bsuccessful.*payment|successful.*paid|check.*successful/i.test(m);
     
     let bookingId = null;
     let targetBooking = null;
+    let allBookings = [];
     
     // First, try to get booking_id from function responses (most reliable)
     if (allFunctionResponses && allFunctionResponses.length > 0) {
@@ -431,8 +449,17 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
           }
           
           if (bookings.length > 0) {
-            // If user asked about "yesterday", find yesterday's booking
-            if (isYesterday && yesterdayStr) {
+            allBookings = bookings;
+            // If user asked about "today", filter to today
+            if (isToday) {
+              const todayBookings = bookings.filter(b => {
+                const date = b.appointment_date || b.appointmentDate || '';
+                return date === todayStr;
+              });
+              if (todayBookings.length > 0) {
+                targetBooking = todayBookings[0];
+              }
+            } else if (isYesterday && yesterdayStr) {
               targetBooking = bookings.find(b => {
                 const date = b.appointment_date || b.appointmentDate || '';
                 return date === yesterdayStr;
@@ -448,6 +475,36 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
             }
           }
         }
+      }
+    }
+    
+    // If we need to fetch bookings (for "today" or "successful payments today")
+    if ((isToday || isSuccessfulOnly) && allBookings.length === 0) {
+      try {
+        // Fetch both upcoming and past to catch all today's bookings
+        const [upcomingRes, pastRes] = await Promise.all([
+          this.makeApiRequest(userId, userToken, 'GET', '/api/bookings', null, { upcoming: 'true', limit: '100' }),
+          this.makeApiRequest(userId, userToken, 'GET', '/api/bookings', null, { upcoming: 'false', limit: '100' })
+        ]);
+        const upcomingBookings = upcomingRes?.data?.data?.bookings || upcomingRes?.data?.bookings || [];
+        const pastBookings = pastRes?.data?.data?.bookings || pastRes?.data?.bookings || [];
+        allBookings = [...upcomingBookings, ...pastBookings];
+        
+        if (isToday) {
+          const todayBookings = allBookings.filter(b => {
+            const date = b.appointment_date || b.appointmentDate || '';
+            return date === todayStr;
+          });
+          if (todayBookings.length > 0) {
+            targetBooking = todayBookings[0];
+            bookingId = targetBooking.id || targetBooking.booking_id;
+          }
+        } else if (allBookings.length > 0) {
+          targetBooking = allBookings[0];
+          bookingId = targetBooking.id || targetBooking.booking_id;
+        }
+      } catch (e) {
+        console.error('Error fetching bookings for payment status:', e);
       }
     }
     
@@ -474,15 +531,54 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     if (!bookingId) {
       bookingId = this._getBookingIdFromHistory(historyMessages);
     }
-    
-    if (!bookingId) return null;
 
     try {
-      // Get payment history and find payment for this booking
+      // Get payment history
       const paymentRes = await this.makeApiRequest(userId, userToken, 'GET', '/api/payments/history', null, {});
       const payments = paymentRes?.data?.data?.payments || paymentRes?.data?.payments || [];
       
       if (!Array.isArray(payments)) return null;
+      
+      // If user asked for "successful payments today", return all successful payments for today's bookings
+      if (isSuccessfulOnly && isToday && allBookings.length > 0) {
+        const todayBookings = allBookings.filter(b => {
+          const date = b.appointment_date || b.appointmentDate || '';
+          return date === todayStr;
+        });
+        
+        const successfulPayments = [];
+        for (const booking of todayBookings) {
+          const bid = booking.id || booking.booking_id;
+          const payment = payments.find(p => p.booking_id === bid);
+          if (payment && (payment.status === 'completed' || payment.status === 'succeeded' || payment.status === 'paid')) {
+            successfulPayments.push({ booking, payment });
+          }
+        }
+        
+        if (successfulPayments.length === 0) {
+          return lang
+            ? `<output><p>Je hebt vandaag geen succesvolle betalingen gevonden.</p></output>`
+            : `<output><p>I found no successful payments for your bookings today.</p></output>`;
+        }
+        
+        const total = successfulPayments.reduce((sum, sp) => sum + (Number(sp.payment.amount) || 0), 0);
+        const cards = successfulPayments.map(({ booking, payment }) => {
+          const salonName = booking.salons?.business_name || booking.salon?.business_name || booking.salonName || 'Salon';
+          const serviceName = booking.services?.name || booking.service?.name || booking.serviceName || 'Service';
+          const date = booking.appointment_date || booking.appointmentDate || '';
+          const time = (booking.start_time || booking.startTime || '').toString().slice(0, 5);
+          const amount = payment.amount != null ? `€${Number(payment.amount).toFixed(2)}` : '';
+          const bookingId = booking.id || '';
+          return `<div class="ai-card" data-booking-id="${bookingId}" style="padding:16px;margin:8px 0;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;"><h3 style="margin:0 0 8px 0;font-size:16px;font-weight:600;">${salonName}</h3><p style="margin:4px 0;color:#666;font-size:14px;">${serviceName}</p><p style="margin:4px 0;color:#666;font-size:14px;">${date} ${time}</p><p style="margin:4px 0;color:#22c55e;font-size:14px;font-weight:600;">✓ Paid: ${amount}</p></div>`;
+        }).join('');
+        
+        return lang
+          ? `<output><p>Ik heb ${successfulPayments.length} succesvolle betaling(en) gevonden voor vandaag, totaal €${total.toFixed(2)}:</p>${cards}</output>`
+          : `<output><p>I found ${successfulPayments.length} successful payment(s) for today, totaling €${total.toFixed(2)}:</p>${cards}</output>`;
+      }
+      
+      // Single booking payment check
+      if (!bookingId) return null;
       
       // Find payment for this booking
       const payment = payments.find(p => p.booking_id === bookingId);
@@ -581,12 +677,26 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     const isYesterday = /\byesterday\b|gisteren/i.test(m);
     const upcoming = isYesterday ? 'false' : 'true';
     try {
-      const res = await this.makeApiRequest(userId, userToken, 'GET', '/api/bookings', null, { upcoming, limit: '100' });
-      const raw = res?.data?.data?.bookings || res?.data?.bookings || [];
-      let list = Array.isArray(raw) ? raw : [];
-      if (isToday) list = list.filter(b => (b.appointment_date || b.appointmentDate || '') === todayStr);
-      else if (isTomorrow) list = list.filter(b => (b.appointment_date || b.appointmentDate || '') === tomorrowStr);
-      else if (isYesterday) list = list.filter(b => (b.appointment_date || b.appointmentDate || '') === yesterdayStr);
+      let list = [];
+      
+      // For "today", fetch both upcoming and past to catch all bookings
+      if (isToday) {
+        const [upcomingRes, pastRes] = await Promise.all([
+          this.makeApiRequest(userId, userToken, 'GET', '/api/bookings', null, { upcoming: 'true', limit: '100' }),
+          this.makeApiRequest(userId, userToken, 'GET', '/api/bookings', null, { upcoming: 'false', limit: '100' })
+        ]);
+        const upcomingBookings = upcomingRes?.data?.data?.bookings || upcomingRes?.data?.bookings || [];
+        const pastBookings = pastRes?.data?.data?.bookings || pastRes?.data?.bookings || [];
+        const allBookings = [...upcomingBookings, ...pastBookings];
+        list = allBookings.filter(b => (b.appointment_date || b.appointmentDate || '') === todayStr);
+      } else {
+        const res = await this.makeApiRequest(userId, userToken, 'GET', '/api/bookings', null, { upcoming, limit: '100' });
+        const raw = res?.data?.data?.bookings || res?.data?.bookings || [];
+        list = Array.isArray(raw) ? raw : [];
+        if (isTomorrow) list = list.filter(b => (b.appointment_date || b.appointmentDate || '') === tomorrowStr);
+        else if (isYesterday) list = list.filter(b => (b.appointment_date || b.appointmentDate || '') === yesterdayStr);
+      }
+      
       const lang = userContext?.language === 'nl';
       if (list.length === 0) {
         const msg = isToday ? (lang ? 'Je hebt vandaag geen afspraken.' : 'You have no appointments today.')
@@ -614,6 +724,106 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
       const head = lang ? `Je hebt ${list.length} afspraak/afspraken:` : `You have ${list.length} appointment(s):`;
       return `<output><p style="margin-bottom:16px;font-size:16px;font-weight:600;">${head}</p>${cards}</output>`;
     } catch (e) { return null; }
+  }
+
+  // When the user asked about sales/analytics but the AI failed:
+  // fetch bookings and payments to calculate sales
+  async _salesAnalyticsFallback(message, userContext, userId, userToken) {
+    const lang = userContext?.language === 'nl';
+    const m = message.toLowerCase();
+    const isSales = /\b(sales|revenue|analytics|analyze|analyse|omzet|winst|how much.*make|how much.*earn)\b/i.test(m);
+    if (!isSales) return null;
+
+    const isToday = /\btoday\b|vandaag/i.test(m);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    
+    try {
+      // For salon owners, try analytics API first
+      if (userContext?.user_type === 'salon_owner') {
+        try {
+          const analyticsRes = await this.makeApiRequest(userId, userToken, 'GET', '/api/analytics', null, {});
+          const analytics = analyticsRes?.data?.data || analyticsRes?.data || {};
+          
+          if (analytics.revenue) {
+            const total = analytics.revenue.total || 0;
+            const count = analytics.revenue.count || 0;
+            const currency = analytics.revenue.currency || 'EUR';
+            
+            if (isToday && analytics.revenue.timeline) {
+              const todayRevenue = analytics.revenue.timeline.find(t => t.date === todayStr);
+              if (todayRevenue) {
+                return lang
+                  ? `<output><p>Je hebt vandaag €${Number(todayRevenue.value).toFixed(2)} omzet gegenereerd uit ${count} boeking(en).</p></output>`
+                  : `<output><p>Your sales for today are €${Number(todayRevenue.value).toFixed(2)} from ${count} booking(s).</p></output>`;
+              }
+            }
+            
+            return lang
+              ? `<output><p>Je totale omzet is €${Number(total).toFixed(2)} uit ${count} boeking(en).</p></output>`
+              : `<output><p>Your total revenue is €${Number(total).toFixed(2)} from ${count} booking(s).</p></output>`;
+          }
+        } catch (e) {
+          console.error('Error fetching analytics:', e);
+          // Fall through to bookings/payments calculation
+        }
+      }
+      
+      // Fallback: Calculate from bookings and payments
+      const [upcomingRes, pastRes] = await Promise.all([
+        this.makeApiRequest(userId, userToken, 'GET', '/api/bookings', null, { upcoming: 'true', limit: '100' }),
+        this.makeApiRequest(userId, userToken, 'GET', '/api/bookings', null, { upcoming: 'false', limit: '100' })
+      ]);
+      const upcomingBookings = upcomingRes?.data?.data?.bookings || upcomingRes?.data?.bookings || [];
+      const pastBookings = pastRes?.data?.data?.bookings || pastRes?.data?.bookings || [];
+      const allBookings = [...upcomingBookings, ...pastBookings];
+      
+      // Filter to today if requested
+      let relevantBookings = allBookings;
+      if (isToday) {
+        relevantBookings = allBookings.filter(b => {
+          const date = b.appointment_date || b.appointmentDate || '';
+          return date === todayStr;
+        });
+      }
+      
+      // Get payment history
+      const paymentRes = await this.makeApiRequest(userId, userToken, 'GET', '/api/payments/history', null, {});
+      const payments = paymentRes?.data?.data?.payments || paymentRes?.data?.payments || [];
+      
+      if (!Array.isArray(payments)) {
+        return lang
+          ? `<output><p>Ik kan je omzet niet berekenen omdat er geen betalingsgegevens beschikbaar zijn.</p></output>`
+          : `<output><p>I cannot calculate your sales because payment data is not available.</p></output>`;
+      }
+      
+      // Calculate revenue from successful payments for relevant bookings
+      let totalRevenue = 0;
+      let successfulCount = 0;
+      const bookingIds = relevantBookings.map(b => b.id || b.booking_id).filter(Boolean);
+      
+      for (const payment of payments) {
+        if (bookingIds.includes(payment.booking_id)) {
+          const status = payment.status || 'pending';
+          if (status === 'completed' || status === 'succeeded' || status === 'paid') {
+            totalRevenue += Number(payment.amount) || 0;
+            successfulCount++;
+          }
+        }
+      }
+      
+      if (isToday) {
+        return lang
+          ? `<output><p>Je hebt vandaag €${totalRevenue.toFixed(2)} omzet gegenereerd uit ${successfulCount} succesvolle betaling(en).</p></output>`
+          : `<output><p>Your sales for today are €${totalRevenue.toFixed(2)} from ${successfulCount} successful payment(s).</p></output>`;
+      } else {
+        return lang
+          ? `<output><p>Je totale omzet is €${totalRevenue.toFixed(2)} uit ${successfulCount} succesvolle betaling(en).</p></output>`
+          : `<output><p>Your total revenue is €${totalRevenue.toFixed(2)} from ${successfulCount} successful payment(s).</p></output>`;
+      }
+    } catch (e) {
+      console.error('Error in sales analytics fallback:', e);
+      return null;
+    }
   }
 
   // Make authenticated API request on behalf of user
@@ -1369,8 +1579,20 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
               }
             }
           } else if (!aiResponse || !String(aiResponse).trim()) {
+            // If they asked about sales/analytics (check this first)
+            const isSalesQuery = /\b(sales|revenue|analytics|analyze|analyse|omzet|winst|how much.*make|how much.*earn)\b/i.test(message);
+            if (isSalesQuery) {
+              try {
+                const salesHtml = await this._salesAnalyticsFallback(message, userContext, userId, userToken);
+                if (salesHtml) {
+                  aiResponse = salesHtml;
+                }
+              } catch (e) {
+                console.error('Error in sales analytics fallback:', e);
+              }
+            }
             // If they asked for one thing about one salon (picture, location, maps, services), try that first
-            if (/\b(picture|image|photo|location|address|maps|map|navigate|services)\b|where is the picture|show me in maps|in a map|their services|what services|show me their services|what do they offer/i.test(message)) {
+            if (!aiResponse && /\b(picture|image|photo|location|address|maps|map|navigate|services)\b|where is the picture|show me in maps|in a map|their services|what services|show me their services|what do they offer/i.test(message)) {
               try {
                 const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
                 if (html) aiResponse = html;
@@ -1378,7 +1600,7 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
             }
             // If they asked about payment status (check this BEFORE bookings to handle combined queries)
             const isPaymentQuery = /\b(payment|paid|successful|success|status|check if.*payment|was.*successful|yes or no|tech status|did.*fail|payment.*tech|payment.*status)\b/i.test(message);
-            if (isPaymentQuery) {
+            if (!aiResponse && isPaymentQuery) {
               try {
                 // Try payment status fallback - it will fetch bookings if needed
                 const paymentHtml = await this._paymentStatusFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses);
@@ -1462,6 +1684,44 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
             ? 'Ik begrijp het niet helemaal. Kun je in je eigen woorden vertellen wat je nodig hebt?'
             : "I didn't quite get that. Could you tell me in your own words what you're looking for?";
           console.log('🔄 Replaced forbidden "verwerkt" response with follow-up (user said:', message.substring(0, 50), ')');
+        }
+      }
+      // If the model said "I can't analyze sales" or "that functionality is not available" for sales, fetch and calculate
+      if (aiResponse && /(I can't|cannot|can not|that functionality is not available|not available).*(analyze|sales|revenue|analytics)/i.test(aiResponse) && /\b(sales|revenue|analytics|analyze|analyse|omzet|winst)\b/i.test(message)) {
+        try {
+          const salesHtml = await this._salesAnalyticsFallback(message, userContext, userId, userToken);
+          if (salesHtml) {
+            aiResponse = salesHtml;
+            console.log('🔄 Replaced "cannot analyze sales" response with actual sales data');
+          }
+        } catch (e) {
+          console.error('Error in sales analytics fallback:', e);
+        }
+      }
+      // If user insists they have bookings/appointments ("I do but check it", "I do but", "check it its paid") after AI said no, fetch again
+      if (aiResponse && /(no appointments|geen afspraken|no bookings)/i.test(aiResponse) && /\b(I do|I have|check it|its paid|check.*paid|successful.*payment)\b/i.test(message)) {
+        try {
+          const m = message.toLowerCase();
+          const isToday = /\btoday\b|vandaag/i.test(m);
+          const isPayment = /\b(paid|payment|successful|check.*paid)\b/i.test(m);
+          
+          if (isPayment) {
+            // User wants to check payment status - fetch bookings and payments
+            const paymentHtml = await this._paymentStatusFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses);
+            if (paymentHtml) {
+              aiResponse = paymentHtml;
+              console.log('🔄 Replaced "no appointments" with payment status check after user insisted');
+            }
+          } else {
+            // User insists they have bookings - fetch both upcoming and past
+            const bookingsHtml = await this._bookingsFallback(message, userContext, userId, userToken);
+            if (bookingsHtml && !/(no appointments|geen afspraken)/i.test(bookingsHtml)) {
+              aiResponse = bookingsHtml;
+              console.log('🔄 Replaced "no appointments" with bookings after user insisted');
+            }
+          }
+        } catch (e) {
+          console.error('Error checking bookings after user insisted:', e);
         }
       }
       // If the model said "I can't search for top-rated" or similar, fetch salons and show cards instead
