@@ -80,17 +80,22 @@ HOW TO BE NATURAL:
 **APPOINTMENTS & BOOKINGS – YOU HAVE NO BUILT-IN DATA** – You do not have the user's bookings, calendar, or schedule. For **any** question about their appointments ("do I have any today?", "what's on my schedule?", "any bookings?", "do I have an appointment tomorrow?", "wat staat in mijn boeking lijst"), you must **realize you need to fetch**: call make_api_request to GET /api/bookings with upcoming "true" (for today/upcoming) or "false" (for past), and limit as needed. Then answer from the API response. Do not guess or reply with a generic; fetch first, then respond.
 
 **BOOKING FOLLOW-UPS** – When the user asks follow-up questions about appointments you just showed:
+- **CRITICAL: UNDERSTAND CONTEXT** – If you just showed bookings and the user asks a follow-up question, they are ALWAYS referring to the bookings you just showed. NEVER respond with "I'm not sure what you need" or "How can I help you?" – use the context from your previous response.
+- **Simple Yes/No or Confirmation Questions**: If the user asks "Yes or no", "Was it successful?", "Did it work?", "Is it paid?", "Check if payment was successful" after you showed bookings, they are asking about the payment status of the booking(s) you just showed. Extract the booking_id from the FIRST booking in your last response, then call GET /api/payments/history to find the payment for that booking_id. Check the payment status (status: "completed", "pending", "failed") and respond with a clear Yes/No answer. Example: "Yes, the payment for your booking at [Salon Name] on [date] was successful." or "No, the payment is still pending." NEVER respond with a generic message.
+- **Payment Status Questions**: "Check if my payments for the last booking was successful", "Was the payment successful?", "Payment status", "Is it paid?" → Extract booking_id from the most recent booking you showed (or the one they're referring to), then GET /api/payments/history and filter by booking_id. Check the payment status and respond clearly.
 - **Time-based follow-ups**: "What about yesterday?", "and tomorrow?", "other days?", "how about yesterday?" → You need **fresh data** for that scope: call GET /api/bookings (upcoming="false" for yesterday/past, "true" for tomorrow/upcoming; for "other days" use upcoming="false" and limit=100 or both scopes). Then answer. Do NOT reply with "How can I help you?" or a generic.
 - **Detail follow-ups about a specific booking**: "Geef mij de locatie voor de eerste" (Give me the location for the first one), "waar is de eerste" (where is the first one), "location of the first booking", "address of that one" → Extract the salon_id from the FIRST booking in your last response (or the specific position they mentioned). Then GET /api/salons/{salonId} to get the address, city, zip_code, latitude, longitude. Provide the full address and a Google Maps link. Do NOT just repeat the booking list.
 - **Other detail questions**: "what services does the first salon offer", "show me the picture of the first one", "opening hours of that salon" → Extract salon_id from the booking, then fetch the specific detail (services, images, business_hours).
 - **Remember**: Each booking object includes salon_id and may include a salons object with salon details. If the salons object has address data, use it directly. Otherwise, fetch full salon details using GET /api/salons/{salonId}.
 
-**DATA QUERIES & FOLLOW-UPS** – Understand intent in any wording or language (like ChatGPT). Infer: what they want (bookings, salons, favorites, services), time/scope (past, upcoming, a date, "other times", "all"), amount ("all" → limit 500). 
+**DATA QUERIES & FOLLOW-UPS** – Understand intent in any wording or language (like ChatGPT). Infer: what they want (bookings, salons, favorites, services, payments), time/scope (past, upcoming, a date, "other times", "all"), amount ("all" → limit 500). 
+- **CRITICAL: CONTEXT AWARENESS** – You MUST maintain context from your previous responses. If you just showed bookings and the user asks ANY follow-up question (even just "Yes or no", "Was it successful?", "Check payment"), they are referring to those bookings. NEVER lose context and respond with "I'm not sure what you need" – use the booking_id(s) from your last response.
 - **SALON NAME SEARCHES (CRITICAL)**: If the user mentions ANY salon name (even if they say "I can't remember", "something with", "goes by", "has name", "I'm looking for", "in search of"), extract the name/keyword and search: GET /api/salons/search?q=extracted_name. Examples: "salon that goes by echt salon" → q=echt salon, "Tahiru something" → q=Tahiru, "has the name Tahiru in it" → q=Tahiru, "I am in search of a salon that has the name Tahiru in it" → q=Tahiru. NEVER respond with "I'm not sure" when a salon name is mentioned—search for it!
 - **DISTANCE/PROXIMITY FOLLOW-UPS (CRITICAL)**: When the user asks about distance after you showed salons ("which one is closest", "which is nearest", "closest to me", "nearest one", "pick the best one" when referring to distance/proximity):
   * If you just showed salons sorted by rating/popularity: Call GET /api/salons/nearby with latitude & longitude from User Context to get salons sorted by distance
   * Then highlight the closest one from that new result OR from the original list if it included distance data
   * NEVER respond with "I'm not sure" - this is a clear follow-up about proximity
+- **PAYMENT FOLLOW-UPS (CRITICAL)**: When the user asks about payment status after you showed bookings ("Check if my payments for the last booking was successful", "Was it successful?", "Yes or no", "Is it paid?", "Payment status"), extract the booking_id from the booking(s) you just showed, then GET /api/payments/history and find the payment with matching booking_id. Check the status field: "completed" = successful, "pending" = not yet paid, "failed" = payment failed. Respond with a clear answer: "Yes, the payment was successful" or "No, the payment is still pending" or "The payment failed". NEVER respond with a generic message.
 - **OTHER FOLLOW-UPS** ("what about other days?", "and tomorrow?"): answer from data you already showed; only call when you need fresh data for a different scope. After you get data, **use HTML <output> with ai-card (data-salon-id or data-booking-id) for any list the user can act on** (tap to view, book, cancel)—it makes the task fast. NEVER output raw JSON.
 
 **OTHER QUESTIONS** (how-to, general info, opening hours, etc.):
@@ -103,6 +108,7 @@ ${contextInfo.length > 0 ? `\nUser Info:\n${contextInfo.join('\n')}\n` : ''}
 Bookings: GET /api/bookings (upcoming, limit), POST /api/bookings (create), GET /api/bookings/available-slots
 Salons: GET /api/salons/search (q, latitude, longitude, sort), GET /api/salons/nearby (latitude, longitude), GET /api/salons/{id}, GET /api/salons/{id}/services
 Favorites: GET /api/favorites, POST /api/favorites, DELETE /api/favorites/{id}
+Payments: GET /api/payments/history (returns payments with booking_id, status, amount) - Use this to check payment status for bookings
 
 **Remember**: You have NO built-in data. For appointments, call /api/bookings first. For salons, use the search/nearby APIs. Always show results as HTML cards.
 
@@ -150,6 +156,9 @@ FAVORITES:
 - POST /api/favorites - Add salon to favorites (body: {salon_id})
 - DELETE /api/favorites/{salonId} - Remove salon from favorites
 - GET /api/favorites/check/{salonId} - Check if salon is favorited
+
+PAYMENTS (CRITICAL for payment status questions):
+- GET /api/payments/history - Get user's payment history (returns array of payments with booking_id, status: "completed"|"pending"|"failed", amount, currency, created_at). Use this to check if a booking's payment was successful. Filter by booking_id to find the payment for a specific booking.
 
 USER PROFILE:
 - GET /api/user/profile - Get current user's profile
@@ -357,6 +366,87 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
       return `<output><p><strong>${salonName}</strong></p><p>${addr}</p>${link}</output>`;
     } catch (e) {
       console.error('Error in booking location fallback:', e);
+      return null;
+    }
+  }
+
+  // When the user asked about payment status for a booking but the AI failed:
+  // extract booking_id from history, fetch payment status, return Yes/No answer
+  async _paymentStatusFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses = []) {
+    const lang = userContext?.language === 'nl';
+    const isPayment = /\b(payment|paid|successful|success|status|check if.*payment|was.*successful|yes or no)\b/i.test(message);
+    if (!isPayment) return null;
+
+    let bookingId = null;
+    
+    // First, try to get booking_id from function responses (most reliable)
+    if (allFunctionResponses && allFunctionResponses.length > 0) {
+      for (let i = allFunctionResponses.length - 1; i >= 0; i--) {
+        const funcResp = allFunctionResponses[i];
+        const responseData = funcResp?.functionResponse?.response?.data;
+        if (responseData) {
+          // Check if this is booking data
+          let bookings = [];
+          if (Array.isArray(responseData)) {
+            bookings = responseData;
+          } else if (responseData.data?.bookings && Array.isArray(responseData.data.bookings)) {
+            bookings = responseData.data.bookings;
+          } else if (responseData.bookings && Array.isArray(responseData.bookings)) {
+            bookings = responseData.bookings;
+          }
+          
+          if (bookings.length > 0) {
+            // Get booking_id from first booking (most recent)
+            const firstBooking = bookings[0];
+            bookingId = firstBooking.id || firstBooking.booking_id;
+            if (bookingId) break;
+          }
+        }
+      }
+    }
+    
+    // Fallback: try to extract from history
+    if (!bookingId) {
+      bookingId = this._getBookingIdFromHistory(historyMessages);
+    }
+    
+    if (!bookingId) return null;
+
+    try {
+      // Get payment history and find payment for this booking
+      const paymentRes = await this.makeApiRequest(userId, userToken, 'GET', '/api/payments/history', null, {});
+      const payments = paymentRes?.data?.data?.payments || paymentRes?.data?.payments || [];
+      
+      if (!Array.isArray(payments)) return null;
+      
+      // Find payment for this booking
+      const payment = payments.find(p => p.booking_id === bookingId);
+      
+      if (!payment) {
+        return lang 
+          ? `<output><p>Geen betaling gevonden voor deze boeking. De betaling is mogelijk nog niet verwerkt.</p></output>`
+          : `<output><p>No payment found for this booking. The payment may not have been processed yet.</p></output>`;
+      }
+      
+      const status = payment.status || 'pending';
+      const isSuccessful = status === 'completed' || status === 'succeeded';
+      const amount = payment.amount != null ? `€${Number(payment.amount).toFixed(2)}` : '';
+      
+      if (isSuccessful) {
+        return lang
+          ? `<output><p><strong>Ja</strong>, de betaling voor je boeking was succesvol${amount ? ` (${amount})` : ''}.</p></output>`
+          : `<output><p><strong>Yes</strong>, the payment for your booking was successful${amount ? ` (${amount})` : ''}.</p></output>`;
+      } else if (status === 'pending') {
+        return lang
+          ? `<output><p><strong>Nee</strong>, de betaling is nog in behandeling (pending).</p></output>`
+          : `<output><p><strong>No</strong>, the payment is still pending.</p></output>`;
+      } else {
+        return lang
+          ? `<output><p><strong>Nee</strong>, de betaling is mislukt (status: ${status}).</p></output>`
+          : `<output><p><strong>No</strong>, the payment failed (status: ${status}).</p></output>`;
+      }
+    } catch (e) {
+      console.error('Error in payment status fallback:', e);
       return null;
     }
   }
@@ -1215,6 +1305,13 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
                 if (html) aiResponse = html;
               } catch (e) {}
             }
+            // If they asked about payment status after showing bookings
+            if (!aiResponse && /\b(payment|paid|successful|success|status|check if.*payment|was.*successful|yes or no)\b/i.test(message) && this._getBookingIdFromHistory(historyMessages)) {
+              try {
+                const html = await this._paymentStatusFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses);
+                if (html) aiResponse = html;
+              } catch (e) {}
+            }
             // If they asked about appointments/bookings (today, yesterday, "what about tomorrow", etc.), fetch and show
             if (!aiResponse && /\b(appointment|booking|bookings|plans|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b|do I have|any (plans|appointment)|(my|any) (bookings|appointments)|what about (yesterday|tomorrow|other days)|how about (yesterday|tomorrow|other days)|\bother days\b/i.test(message)) {
               try {
@@ -1300,8 +1397,15 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
       const isOneSpecificThing = /\b(picture|image|photo|location|address|maps|map|navigate|services)\b|where is the picture|show me in maps|in a map|their services|what services|show me their services|what do they offer/i.test(message);
       const isBookingLocation = /\b(location|address|locatie|adres|waar is|where is|geef mij de locatie|give me the location)\b/i.test(message) && 
         (/\b(first|eerste|second|tweede|that|die|this|deze|booking|boeking)\b/i.test(message) || this._getBookingIdFromHistory(historyMessages));
-      if (isGenericHelp && (userWantsSalons || isOneSpecificThing || userWantsBookings || isBookingLocation)) {
-        if (isBookingLocation) {
+      const isPaymentQuestion = /\b(payment|paid|successful|success|status|check if.*payment|was.*successful|yes or no)\b/i.test(message) && 
+        (userWantsBookings || this._getBookingIdFromHistory(historyMessages));
+      if (isGenericHelp && (userWantsSalons || isOneSpecificThing || userWantsBookings || isBookingLocation || isPaymentQuestion)) {
+        if (isPaymentQuestion) {
+          try {
+            const html = await this._paymentStatusFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses);
+            if (html) { aiResponse = html; console.log('🔄 Replaced generic with payment status'); }
+          } catch (e) { /* leave generic */ }
+        } else if (isBookingLocation) {
           try {
             const html = await this._bookingLocationFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses);
             if (html) { aiResponse = html; console.log('🔄 Replaced generic with booking location'); }

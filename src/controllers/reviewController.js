@@ -2,6 +2,7 @@ const { supabase, supabaseAdmin } = require('../config/database');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const emailService = require('../services/emailService');
 const supabaseService = require('../services/supabaseService');
+const aiService = require('../services/aiService');
 
 class ReviewController {
   // Get reviews for a salon
@@ -256,6 +257,13 @@ class ReviewController {
 
       // Update salon rating_average and rating_count
       await this._updateSalonRating(salon_id);
+
+      // Trigger AI analysis of the review (async, don't wait)
+      if (comment && comment.trim().length > 0) {
+        this._analyzeReviewWithAI(review.id, comment).catch(err => {
+          console.error('Error in AI analysis:', err);
+        });
+      }
 
       // Send email notification to salon owner
       try {
@@ -691,6 +699,140 @@ class ReviewController {
     } catch (error) {
       console.error('Error sending review notification email:', error);
       // Don't throw - email failure shouldn't break review creation
+    }
+  }
+
+  // Salon owner reply to a review
+  replyToReview = asyncHandler(async (req, res) => {
+    const { reviewId } = req.params;
+    const { reply } = req.body;
+    const userId = req.user.id;
+
+    if (!reviewId) {
+      throw new AppError('Review ID is required', 400, 'MISSING_REVIEW_ID');
+    }
+
+    if (!reply || reply.trim().length === 0) {
+      throw new AppError('Reply text is required', 400, 'MISSING_REPLY');
+    }
+
+    try {
+      // Get the review and verify salon ownership
+      const { data: review, error: reviewError } = await supabaseAdmin
+        .from('reviews')
+        .select('*, salon:salons!reviews_salon_id_fkey(owner_id)')
+        .eq('id', reviewId)
+        .single();
+
+      if (reviewError || !review) {
+        throw new AppError('Review not found', 404, 'REVIEW_NOT_FOUND');
+      }
+
+      // Check if user is the salon owner
+      const salonOwnerId = review.salon?.owner_id;
+      if (salonOwnerId !== userId) {
+        throw new AppError('You do not have permission to reply to this review', 403, 'UNAUTHORIZED');
+      }
+
+      // Update review with owner reply
+      const { data: updatedReview, error: updateError } = await supabaseAdmin
+        .from('reviews')
+        .update({
+          owner_reply: reply.trim(),
+          owner_reply_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', reviewId)
+        .select('*')
+        .single();
+
+      if (updateError) {
+        console.error('Error updating review with reply:', updateError);
+        throw new AppError('Failed to add reply', 500, 'REPLY_UPDATE_FAILED');
+      }
+
+      res.status(200).json({
+        success: true,
+        data: {
+          review: updatedReview,
+        },
+      });
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError('Failed to reply to review', 500, 'REPLY_FAILED');
+    }
+  });
+
+  // AI analysis helper (called asynchronously)
+  async _analyzeReviewWithAI(reviewId, comment) {
+    try {
+      // Check if already analyzed
+      const { data: existing } = await supabaseAdmin
+        .from('reviews')
+        .select('ai_analyzed')
+        .eq('id', reviewId)
+        .single();
+
+      if (existing?.ai_analyzed) {
+        return; // Already analyzed
+      }
+
+      // Use AI service to analyze the comment
+      const analysis = await aiService.analyzeReviewContent(comment);
+
+      // Update review with AI analysis
+      const updateData = {
+        ai_analyzed: true,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (analysis.flagged) {
+        updateData.ai_flag_type = analysis.flagType;
+        updateData.ai_confidence = analysis.confidence;
+        updateData.ai_notes = analysis.notes;
+        updateData.is_visible = false; // Hide flagged reviews until human review
+
+        // Create automatic report if AI flags something serious
+        if (analysis.flagType === 'hateful' || analysis.flagType === 'suicidal' || analysis.flagType === 'inappropriate') {
+          // Get review to find client_id
+          const { data: review } = await supabaseAdmin
+            .from('reviews')
+            .select('client_id')
+            .eq('id', reviewId)
+            .single();
+
+          if (review) {
+            await supabaseAdmin
+              .from('review_reports')
+              .insert([{
+                review_id: reviewId,
+                reporter_id: null, // System-generated report
+                reportee_id: review.client_id,
+                reason: analysis.flagType,
+                description: `AI automatically flagged: ${analysis.notes}`,
+                status: 'pending',
+                ai_flagged: true,
+                ai_flag_reason: analysis.notes,
+                human_action_required: true, // Always require human review for AI-flagged content
+              }]);
+          }
+        }
+      } else {
+        updateData.ai_confidence = analysis.confidence || 0.0;
+        updateData.ai_notes = analysis.notes || 'No issues detected';
+      }
+
+      await supabaseAdmin
+        .from('reviews')
+        .update(updateData)
+        .eq('id', reviewId);
+
+      console.log(`✅ AI analysis completed for review ${reviewId}`);
+    } catch (error) {
+      console.error('Error in AI analysis:', error);
+      // Don't throw - this is async and shouldn't break review creation
     }
   }
 }

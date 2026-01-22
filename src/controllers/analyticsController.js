@@ -54,8 +54,8 @@ class AnalyticsController {
         this._getPerformanceMetrics(salonId, startDate)
       ]);
 
-      res.status(200).json({
-        success: true,
+    res.status(200).json({
+      success: true,
         data: {
           revenue: revenueData,
           bookings: bookingsData,

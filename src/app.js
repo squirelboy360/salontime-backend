@@ -27,6 +27,7 @@ const analyticsRoutes = require('./routes/analyticsRoutes');
 const cronRoutes = require('./routes/cronRoutes');
 const businessHoursRoutes = require('./routes/businessHours');
 const reviewRoutes = require('./routes/reviewRoutes');
+const reportRoutes = require('./routes/reportRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
 
@@ -158,6 +159,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/cron', cronRoutes);
 app.use('/api/salon', businessHoursRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/reports', reportRoutes);
 app.use('/api/ai', aiRoutes);
 
 // Root endpoint

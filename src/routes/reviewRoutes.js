@@ -16,5 +16,8 @@ router.get('/booking/:bookingId/can-review', reviewController.canReviewBooking);
 router.put('/:reviewId', reviewController.updateReview);
 router.delete('/:reviewId', reviewController.deleteReview);
 
+// Salon owner reply to review
+router.post('/:reviewId/reply', reviewController.replyToReview);
+
 module.exports = router;
 
