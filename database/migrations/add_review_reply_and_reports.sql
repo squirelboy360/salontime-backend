@@ -38,9 +38,15 @@ CREATE INDEX IF NOT EXISTS idx_review_reports_reporter_id ON public.review_repor
 CREATE INDEX IF NOT EXISTS idx_review_reports_status ON public.review_reports(status);
 CREATE INDEX IF NOT EXISTS idx_review_reports_human_action ON public.review_reports(human_action_required) WHERE human_action_required = true;
 
--- Add updated_at trigger
+-- Add updated_at trigger for review_reports
 CREATE TRIGGER handle_review_reports_updated_at
     BEFORE UPDATE ON public.review_reports
+    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
+-- Add updated_at trigger for reviews (if it doesn't exist)
+DROP TRIGGER IF EXISTS handle_reviews_updated_at ON public.reviews;
+CREATE TRIGGER handle_reviews_updated_at
+    BEFORE UPDATE ON public.reviews
     FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 
 -- =============================================

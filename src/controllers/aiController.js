@@ -79,10 +79,23 @@ HOW TO BE NATURAL:
 
 **APPOINTMENTS & BOOKINGS – YOU HAVE NO BUILT-IN DATA** – You do not have the user's bookings, calendar, or schedule. For **any** question about their appointments ("do I have any today?", "what's on my schedule?", "any bookings?", "do I have an appointment tomorrow?", "wat staat in mijn boeking lijst"), you must **realize you need to fetch**: call make_api_request to GET /api/bookings with upcoming "true" (for today/upcoming) or "false" (for past), and limit as needed. Then answer from the API response. Do not guess or reply with a generic; fetch first, then respond.
 
+**PAYMENT STATUS QUESTIONS (CRITICAL)** – When the user asks about payment status ("payment status", "was payment successful", "did payment fail", "payment status of my booking", "tech status", "payment tech status"), you MUST:
+1. First, fetch their bookings using GET /api/bookings (upcoming="false" for past bookings, "true" for upcoming)
+2. Then, for EACH booking they asked about (or the most recent one if they said "yesterday" or "last"), call GET /api/payments/history to get payment history
+3. Match the booking_id from the booking to the payment history to find the payment status
+4. Respond with a CLEAR answer: "Yes, the payment was successful" or "No, the payment failed" or "The payment is still pending" - include the booking details (salon name, service, date) and payment amount if available
+5. Do NOT just show the booking list - answer the payment question directly with text, then optionally show the booking card if helpful
+
 **BOOKING FOLLOW-UPS** – When the user asks follow-up questions about appointments you just showed:
 - **CRITICAL: UNDERSTAND CONTEXT** – If you just showed bookings and the user asks a follow-up question, they are ALWAYS referring to the bookings you just showed. NEVER respond with "I'm not sure what you need" or "How can I help you?" – use the context from your previous response.
-- **Simple Yes/No or Confirmation Questions**: If the user asks "Yes or no", "Was it successful?", "Did it work?", "Is it paid?", "Check if payment was successful" after you showed bookings, they are asking about the payment status of the booking(s) you just showed. Extract the booking_id from the FIRST booking in your last response, then call GET /api/payments/history to find the payment for that booking_id. Check the payment status (status: "completed", "pending", "failed") and respond with a clear Yes/No answer. Example: "Yes, the payment for your booking at [Salon Name] on [date] was successful." or "No, the payment is still pending." NEVER respond with a generic message.
-- **Payment Status Questions**: "Check if my payments for the last booking was successful", "Was the payment successful?", "Payment status", "Is it paid?" → Extract booking_id from the most recent booking you showed (or the one they're referring to), then GET /api/payments/history and filter by booking_id. Check the payment status and respond clearly.
+- **Payment Status Questions (CRITICAL)**: When the user asks about payment status ("payment status", "was payment successful", "did payment fail", "payment status of my booking", "tech status", "payment tech status", "did it fail in payment", "was it successful"), you MUST:
+  1. If you just showed bookings, extract the booking_id(s) from those bookings (especially if they said "yesterday", "last", "first", etc.)
+  2. Call GET /api/payments/history to get all payments
+  3. Match booking_id from the booking(s) to find the payment(s)
+  4. Check payment status: "completed"/"succeeded"/"paid" = successful, "pending" = in progress, "failed" = failed
+  5. Respond with a CLEAR, DIRECT answer in natural language: "Yes, the payment for your booking at [Salon Name] on [date] was successful (€X.XX)" or "No, the payment failed" or "The payment is still pending"
+  6. Do NOT just repeat the booking list - answer the question first, then optionally show booking details if helpful
+- **Simple Yes/No or Confirmation Questions**: If the user asks "Yes or no", "Was it successful?", "Did it work?", "Is it paid?", "Check if payment was successful" after you showed bookings, they are asking about the payment status. Follow the payment status question process above.
 - **Time-based follow-ups**: "What about yesterday?", "and tomorrow?", "other days?", "how about yesterday?" → You need **fresh data** for that scope: call GET /api/bookings (upcoming="false" for yesterday/past, "true" for tomorrow/upcoming; for "other days" use upcoming="false" and limit=100 or both scopes). Then answer. Do NOT reply with "How can I help you?" or a generic.
 - **Detail follow-ups about a specific booking**: "Geef mij de locatie voor de eerste" (Give me the location for the first one), "waar is de eerste" (where is the first one), "location of the first booking", "address of that one" → Extract the salon_id from the FIRST booking in your last response (or the specific position they mentioned). Then GET /api/salons/{salonId} to get the address, city, zip_code, latitude, longitude. Provide the full address and a Google Maps link. Do NOT just repeat the booking list.
 - **Other detail questions**: "what services does the first salon offer", "show me the picture of the first one", "opening hours of that salon" → Extract salon_id from the booking, then fetch the specific detail (services, images, business_hours).
@@ -374,10 +387,14 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
   // extract booking_id from history, fetch payment status, return Yes/No answer
   async _paymentStatusFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses = []) {
     const lang = userContext?.language === 'nl';
-    const isPayment = /\b(payment|paid|successful|success|status|check if.*payment|was.*successful|yes or no)\b/i.test(message);
+    const isPayment = /\b(payment|paid|successful|success|status|check if.*payment|was.*successful|yes or no|tech status|did.*fail|payment.*tech|payment.*status|fail.*payment)\b/i.test(message);
     if (!isPayment) return null;
 
+    const isYesterday = /\byesterday\b|gisteren/i.test(message);
+    const yesterdayStr = isYesterday ? new Date(Date.now() - 864e5).toISOString().slice(0, 10) : null;
+    
     let bookingId = null;
+    let targetBooking = null;
     
     // First, try to get booking_id from function responses (most reliable)
     if (allFunctionResponses && allFunctionResponses.length > 0) {
@@ -396,12 +413,42 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
           }
           
           if (bookings.length > 0) {
-            // Get booking_id from first booking (most recent)
-            const firstBooking = bookings[0];
-            bookingId = firstBooking.id || firstBooking.booking_id;
-            if (bookingId) break;
+            // If user asked about "yesterday", find yesterday's booking
+            if (isYesterday && yesterdayStr) {
+              targetBooking = bookings.find(b => {
+                const date = b.appointment_date || b.appointmentDate || '';
+                return date === yesterdayStr;
+              });
+            } else {
+              // Otherwise get first booking (most recent)
+              targetBooking = bookings[0];
+            }
+            
+            if (targetBooking) {
+              bookingId = targetBooking.id || targetBooking.booking_id;
+              if (bookingId) break;
+            }
           }
         }
+      }
+    }
+    
+    // If we still don't have a booking and user asked about yesterday, fetch bookings
+    if (!bookingId && isYesterday) {
+      try {
+        const bookingsRes = await this.makeApiRequest(userId, userToken, 'GET', '/api/bookings', null, { upcoming: 'false', limit: '100' });
+        const bookings = bookingsRes?.data?.data?.bookings || bookingsRes?.data?.bookings || [];
+        if (Array.isArray(bookings) && bookings.length > 0) {
+          targetBooking = bookings.find(b => {
+            const date = b.appointment_date || b.appointmentDate || '';
+            return date === yesterdayStr;
+          });
+          if (targetBooking) {
+            bookingId = targetBooking.id || targetBooking.booking_id;
+          }
+        }
+      } catch (e) {
+        console.error('Error fetching bookings for payment status:', e);
       }
     }
     
@@ -429,21 +476,27 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
       }
       
       const status = payment.status || 'pending';
-      const isSuccessful = status === 'completed' || status === 'succeeded';
+      const isSuccessful = status === 'completed' || status === 'succeeded' || status === 'paid';
       const amount = payment.amount != null ? `€${Number(payment.amount).toFixed(2)}` : '';
+      
+      // Get booking details for context
+      const salonName = targetBooking?.salons?.business_name || targetBooking?.salon?.business_name || targetBooking?.salonName || 'Salon';
+      const serviceName = targetBooking?.services?.name || targetBooking?.service?.name || targetBooking?.serviceName || 'Service';
+      const bookingDate = targetBooking?.appointment_date || targetBooking?.appointmentDate || '';
+      const bookingTime = (targetBooking?.start_time || targetBooking?.startTime || '').toString().slice(0, 5);
       
       if (isSuccessful) {
         return lang
-          ? `<output><p><strong>Ja</strong>, de betaling voor je boeking was succesvol${amount ? ` (${amount})` : ''}.</p></output>`
-          : `<output><p><strong>Yes</strong>, the payment for your booking was successful${amount ? ` (${amount})` : ''}.</p></output>`;
+          ? `<output><p><strong>Ja</strong>, de betaling voor je boeking bij ${salonName}${bookingDate ? ` op ${bookingDate}` : ''}${bookingTime ? ` om ${bookingTime}` : ''} was succesvol${amount ? ` (${amount})` : ''}.</p></output>`
+          : `<output><p><strong>Yes</strong>, the payment for your booking at ${salonName}${bookingDate ? ` on ${bookingDate}` : ''}${bookingTime ? ` at ${bookingTime}` : ''} was successful${amount ? ` (${amount})` : ''}.</p></output>`;
       } else if (status === 'pending') {
         return lang
-          ? `<output><p><strong>Nee</strong>, de betaling is nog in behandeling (pending).</p></output>`
-          : `<output><p><strong>No</strong>, the payment is still pending.</p></output>`;
+          ? `<output><p><strong>Nee</strong>, de betaling voor je boeking bij ${salonName}${bookingDate ? ` op ${bookingDate}` : ''} is nog in behandeling (pending).</p></output>`
+          : `<output><p><strong>No</strong>, the payment for your booking at ${salonName}${bookingDate ? ` on ${bookingDate}` : ''} is still pending.</p></output>`;
       } else {
         return lang
-          ? `<output><p><strong>Nee</strong>, de betaling is mislukt (status: ${status}).</p></output>`
-          : `<output><p><strong>No</strong>, the payment failed (status: ${status}).</p></output>`;
+          ? `<output><p><strong>Nee</strong>, de betaling voor je boeking bij ${salonName}${bookingDate ? ` op ${bookingDate}` : ''} is mislukt (status: ${status}).</p></output>`
+          : `<output><p><strong>No</strong>, the payment for your booking at ${salonName}${bookingDate ? ` on ${bookingDate}` : ''} failed (status: ${status}).</p></output>`;
       }
     } catch (e) {
       console.error('Error in payment status fallback:', e);
@@ -1305,15 +1358,35 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
                 if (html) aiResponse = html;
               } catch (e) {}
             }
-            // If they asked about payment status after showing bookings
-            if (!aiResponse && /\b(payment|paid|successful|success|status|check if.*payment|was.*successful|yes or no)\b/i.test(message) && this._getBookingIdFromHistory(historyMessages)) {
+            // If they asked about payment status (check this BEFORE bookings to handle combined queries)
+            const isPaymentQuery = /\b(payment|paid|successful|success|status|check if.*payment|was.*successful|yes or no|tech status|did.*fail|payment.*tech|payment.*status)\b/i.test(message);
+            if (isPaymentQuery) {
               try {
-                const html = await this._paymentStatusFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses);
-                if (html) aiResponse = html;
-              } catch (e) {}
+                // Try payment status fallback - it will fetch bookings if needed
+                const paymentHtml = await this._paymentStatusFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses);
+                if (paymentHtml) {
+                  aiResponse = paymentHtml;
+                } else if (!aiResponse) {
+                  // If payment fallback didn't work, try getting bookings first, then payment
+                  const bookingsHtml = await this._bookingsFallback(message, userContext, userId, userToken);
+                  if (bookingsHtml) {
+                    // After getting bookings, try payment status again with updated function responses
+                    const paymentHtml2 = await this._paymentStatusFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses);
+                    if (paymentHtml2) {
+                      // Combine: payment answer first, then booking details
+                      aiResponse = paymentHtml2 + '\n\n' + bookingsHtml;
+                    } else {
+                      aiResponse = bookingsHtml;
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error('Error in payment status fallback:', e);
+              }
             }
             // If they asked about appointments/bookings (today, yesterday, "what about tomorrow", etc.), fetch and show
-            if (!aiResponse && /\b(appointment|booking|bookings|plans|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b|do I have|any (plans|appointment)|(my|any) (bookings|appointments)|what about (yesterday|tomorrow|other days)|how about (yesterday|tomorrow|other days)|\bother days\b/i.test(message)) {
+            // Only if NOT a payment query (payment queries handled above)
+            if (!aiResponse && !isPaymentQuery && /\b(appointment|booking|bookings|plans|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b|do I have|any (plans|appointment)|(my|any) (bookings|appointments)|what about (yesterday|tomorrow|other days)|how about (yesterday|tomorrow|other days)|\bother days\b/i.test(message)) {
               try {
                 const html = await this._bookingsFallback(message, userContext, userId, userToken);
                 if (html) aiResponse = html;

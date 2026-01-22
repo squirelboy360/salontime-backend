@@ -764,13 +764,15 @@ class ReviewController {
       }
 
       // Update review with owner reply
+      // Don't manually set updated_at - let the database handle it or use a trigger
+      const updateData = {
+        owner_reply: reply.trim(),
+        owner_reply_at: new Date().toISOString(),
+      };
+      
       const { data: updatedReview, error: updateError } = await supabaseAdmin
         .from('reviews')
-        .update({
-          owner_reply: reply.trim(),
-          owner_reply_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq('id', reviewId)
         .select('*')
         .single();
