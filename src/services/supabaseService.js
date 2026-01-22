@@ -264,14 +264,25 @@ class SupabaseService {
     
     try {
       // Extract file path from URL
+      // URL format: https://...supabase.co/storage/v1/object/public/salons_assets/{userId}/{fileName}
       const urlParts = imageUrl.split('/');
-      const fileNameIndex = urlParts.findIndex(part => part === userId);
-      if (fileNameIndex === -1 || fileNameIndex === urlParts.length - 1) {
-        throw new AppError('Invalid image URL', 400, 'INVALID_IMAGE_URL');
+      const bucketIndex = urlParts.findIndex(part => part === 'salons_assets');
+      
+      let filePath;
+      if (bucketIndex !== -1 && bucketIndex < urlParts.length - 1) {
+        // Extract path after salons_assets (should be userId/fileName)
+        filePath = urlParts.slice(bucketIndex + 1).join('/');
+      } else {
+        // Fallback: look for userId in URL
+        const userIdIndex = urlParts.findIndex(part => part === userId);
+        if (userIdIndex === -1 || userIdIndex === urlParts.length - 1) {
+          throw new AppError('Invalid image URL format', 400, 'INVALID_IMAGE_URL');
+        }
+        const fileName = urlParts.slice(userIdIndex + 1).join('/');
+        filePath = `${userId}/${fileName}`;
       }
       
-      const fileName = urlParts.slice(fileNameIndex + 1).join('/');
-      const filePath = `${userId}/${fileName}`;
+      console.log(`🗑️ Deleting image from path: ${filePath} (extracted from URL: ${imageUrl.substring(0, 100)}...)`);
 
       const { error } = await supabaseAdmin.storage
         .from(bucketName)

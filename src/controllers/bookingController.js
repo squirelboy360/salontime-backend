@@ -1291,7 +1291,7 @@ class BookingController {
         const { error: updateError } = await supabaseAdmin
           .from('payments')
           .update({
-            status: 'paid',
+            status: 'completed',
             payment_method: 'cash',
             updated_at: new Date().toISOString()
           })
@@ -1309,7 +1309,7 @@ class BookingController {
             booking_id: bookingId,
             amount: amount,
             currency: 'EUR',
-            status: 'paid',
+            status: 'completed',
             payment_method: 'cash',
           });
 

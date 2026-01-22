@@ -118,16 +118,16 @@ Respond ONLY with valid JSON in this exact format:
         throw new Error('Invalid AI response: flagged must be boolean');
       }
 
-      const result = {
+      const analysisResult = {
         flagged: analysis.flagged || false,
         flagType: analysis.flagType || null,
         confidence: Math.max(0.0, Math.min(1.0, parseFloat(analysis.confidence) || 0.0)),
         notes: analysis.notes || 'No issues detected',
       };
       
-      console.log(`🤖 AI analysis result for review: flagged=${result.flagged}, type=${result.flagType}, confidence=${result.confidence}`);
+      console.log(`🤖 AI analysis result for review: flagged=${analysisResult.flagged}, type=${analysisResult.flagType}, confidence=${analysisResult.confidence}`);
       
-      return result;
+      return analysisResult;
     } catch (error) {
       console.error('❌ Error in AI content analysis:', error);
       console.error('❌ Content that failed analysis:', content);
