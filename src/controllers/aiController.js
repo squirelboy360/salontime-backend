@@ -88,12 +88,14 @@ HOW TO BE NATURAL AND CONVERSATIONAL:
 
 **APPOINTMENTS & BOOKINGS – YOU HAVE NO BUILT-IN DATA** – You do not have the user's bookings, calendar, or schedule. For **any** question about their appointments ("do I have any today?", "what's on my schedule?", "any bookings?", "do I have an appointment tomorrow?", "wat staat in mijn boeking lijst", "heb ik vandaag iets op mijn planning staan", "heb ik iets gepland", "staat er iets op mijn planning", "heb ik afspraken vandaag", "wat heb ik vandaag"), you must **realize you need to fetch**: call make_api_request to GET /api/bookings with upcoming "true" (for today/upcoming) or "false" (for past), and limit as needed. Then answer from the API response in a natural, conversational way. For example: "You have 2 appointments coming up: [list them naturally]" or "Je hebt vandaag geen afspraken, maar morgen wel een bij [salon]." or "Nee, je hebt vandaag niets op je planning staan." Do not guess or reply with a generic; fetch first, then respond naturally.
 
-**SALES & ANALYTICS QUESTIONS (CRITICAL)** – When the user asks about sales, revenue, analytics, or analyzing their business ("analyze my sales", "sales for today", "revenue", "how much did I make", "analyse mijn sales", "omzet", "winst", "sales vandaag", "analyze sales"), you MUST:
-1. **For salon owners**: Call GET /api/analytics to get analytics data (revenue, bookings, etc.). If they ask for "today", check if the analytics API supports date filtering, or fetch bookings for today and calculate revenue from payments.
-2. **For clients**: Fetch bookings and payments to calculate sales/revenue. Call GET /api/bookings (upcoming="false" for past, or both true/false for all), then GET /api/payments/history to get payment amounts.
-3. **For "today" or specific dates**: Filter bookings by date (check booking_date or appointment_date field) and sum up payment amounts from matching payments.
-4. **RESPOND NATURALLY**: "Your sales for today are €X.XX from Y bookings" or "Je hebt vandaag €X.XX omzet gegenereerd uit Y boekingen" or "I found X successful payments today totaling €Y.YY"
-5. **NEVER say "that functionality is not available"** - you CAN analyze sales by fetching bookings and payments. Always fetch the data and calculate.
+**SALES & ANALYTICS QUESTIONS (CRITICAL)** – When the user asks about sales, revenue, analytics, or analyzing their business ("analyze my sales", "sales for today", "revenue", "how much did I make", "analyse mijn sales", "omzet", "winst", "sales vandaag", "analyze sales", "Can u see my sales"), you MUST:
+1. **IMMEDIATELY** call the function to fetch data - do NOT say "I'll fetch" or "I'm working on it" or "I'm still fetching"
+2. **For salon owners**: Call GET /api/analytics to get analytics data (revenue, bookings, etc.). If they ask for "today", check if the analytics API supports date filtering, or fetch bookings for today and calculate revenue from payments.
+3. **For clients**: Fetch bookings and payments to calculate sales/revenue. Call GET /api/bookings (upcoming="false" for past, or both true/false for all), then GET /api/payments/history to get payment amounts.
+4. **For "today" or specific dates**: Filter bookings by date (check booking_date or appointment_date field) and sum up payment amounts from matching payments.
+5. **RESPOND IMMEDIATELY WITH RESULTS**: "Your sales for today are €X.XX from Y bookings" or "Je hebt vandaag €X.XX omzet gegenereerd uit Y boekingen" - give the answer directly, don't say you're fetching
+6. **NEVER say "that functionality is not available" or "I can't analyze"** - you CAN analyze sales by fetching bookings and payments. Always fetch the data and calculate.
+7. **NEVER say "I'm still working on retrieving" or "I need to fetch" or "It might take a moment"** - just fetch and respond with the answer immediately
 
 **PAYMENT STATUS QUESTIONS (CRITICAL)** – When the user asks about payment status ("payment status", "was payment successful", "did payment fail", "payment status of my booking", "tech status", "payment tech status", "didn't last booking get paid", "was my last booking paid", "check my bookings for successful payments", "successful payments today", "its paid", "check it its paid", "check if payment was successful"), you MUST:
 1. First, fetch their bookings using GET /api/bookings:
@@ -138,9 +140,11 @@ HOW TO BE NATURAL AND CONVERSATIONAL:
 - Answer helpfully and specifically in a natural, conversational way. Never say "Ik heb je verzoek verwerkt" or generic responses – give a real, helpful answer or offer to look up data naturally.
 
 **GENERAL CONVERSATION RULES**:
+- **CRITICAL: NEVER SAY "I'M WORKING ON IT" OR "I'M FETCHING"** – When you need to fetch data, DO IT IMMEDIATELY using function calls, then respond with the actual results. NEVER say "I'm still working on retrieving", "I need to fetch", "I'm still fetching", "It might take a moment", "I'll let you know as soon as I have the information" – these are terrible user experiences. Just fetch the data and respond with the results immediately.
+- **LANGUAGE MATCHING (CRITICAL)**: Match the user's language. If they write in Dutch ("Analyseer", "vandaag", "boekingen"), respond in Dutch. If they write in English, respond in English. Check the message language, not just userContext.language. Use Dutch phrases like "Je hebt", "Je omzet", "boekingen" when user writes in Dutch.
 - Always answer questions directly and naturally first, then provide supporting details
 - Be warm, friendly, and conversational - like talking to a helpful friend
-- If you need to fetch data, say something like "Let me check that for you..." or "I'll look that up..." then explain what you found naturally
+- When you call a function to fetch data, WAIT for the response, then immediately provide the answer with the data. Do NOT say you're fetching - just fetch and respond.
 - Never just dump data without context - always explain what you found in a conversational way
 - If you're unsure what they need, ask naturally: "Which booking are you asking about?" or "Are you asking about a specific salon?"
 - Use natural language, not robotic responses or lists without explanation
@@ -417,7 +421,9 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
   // When the user asked about payment status for a booking but the AI failed:
   // extract booking_id from history, fetch payment status, return Yes/No answer
   async _paymentStatusFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses = []) {
-    const lang = userContext?.language === 'nl';
+    // Detect language from message itself (user writes in Dutch = respond in Dutch)
+    const messageIsDutch = /\b(vandaag|boekingen|betaling|succesvol|geannuleerd|afspraak|heb|heeft|mijn|voor|de|het)\b/i.test(message);
+    const lang = userContext?.language === 'nl' || messageIsDutch;
     const isPayment = /\b(payment|paid|successful|success|status|check if.*payment|was.*successful|yes or no|tech status|did.*fail|payment.*tech|payment.*status|fail.*payment|check.*successful.*payment|successful.*payment)\b/i.test(message);
     if (!isPayment) return null;
 
@@ -676,6 +682,9 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     const isTomorrow = /\btomorrow\b|morgen/i.test(m);
     const isYesterday = /\byesterday\b|gisteren/i.test(m);
     const upcoming = isYesterday ? 'false' : 'true';
+    // Detect language from message itself (user writes in Dutch = respond in Dutch)
+    const messageIsDutch = /\b(vandaag|boekingen|afspraken|geannuleerd|heb|heeft|mijn|voor|de|het|planning)\b/i.test(message);
+    const lang = userContext?.language === 'nl' || messageIsDutch;
     try {
       let list = [];
       
@@ -697,7 +706,6 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
         else if (isYesterday) list = list.filter(b => (b.appointment_date || b.appointmentDate || '') === yesterdayStr);
       }
       
-      const lang = userContext?.language === 'nl';
       if (list.length === 0) {
         const msg = isToday ? (lang ? 'Je hebt vandaag geen afspraken.' : 'You have no appointments today.')
           : isTomorrow ? (lang ? 'Je hebt morgen geen afspraken.' : 'You have no appointments tomorrow.')
@@ -729,7 +737,9 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
   // When the user asked about sales/analytics but the AI failed:
   // fetch bookings and payments to calculate sales
   async _salesAnalyticsFallback(message, userContext, userId, userToken) {
-    const lang = userContext?.language === 'nl';
+    // Detect language from message itself (user writes in Dutch = respond in Dutch)
+    const messageIsDutch = /\b(analyseer|vandaag|boekingen|omzet|winst|heb|heeft|mijn|voor)\b/i.test(message);
+    const lang = userContext?.language === 'nl' || messageIsDutch;
     const m = message.toLowerCase();
     const isSales = /\b(sales|revenue|analytics|analyze|analyse|omzet|winst|how much.*make|how much.*earn)\b/i.test(m);
     if (!isSales) return null;
@@ -1686,8 +1696,20 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
           console.log('🔄 Replaced forbidden "verwerkt" response with follow-up (user said:', message.substring(0, 50), ')');
         }
       }
+      // If the model said "I'm still working" or "I'm fetching" for sales, replace with actual data
+      if (aiResponse && /(I'm still|still working|still fetching|I need to fetch|I'm fetching|It might take|I'll let you know).*(sales|revenue|analytics|data)/i.test(aiResponse) && /\b(sales|revenue|analytics|analyze|analyse|omzet|winst)\b/i.test(message)) {
+        try {
+          const salesHtml = await this._salesAnalyticsFallback(message, userContext, userId, userToken);
+          if (salesHtml) {
+            aiResponse = salesHtml;
+            console.log('🔄 Replaced "I\'m still working" response with actual sales data');
+          }
+        } catch (e) {
+          console.error('Error in sales analytics fallback:', e);
+        }
+      }
       // If the model said "I can't analyze sales" or "that functionality is not available" for sales, fetch and calculate
-      if (aiResponse && /(I can't|cannot|can not|that functionality is not available|not available).*(analyze|sales|revenue|analytics)/i.test(aiResponse) && /\b(sales|revenue|analytics|analyze|analyse|omzet|winst)\b/i.test(message)) {
+      if (aiResponse && /(I can't|cannot|can not|that functionality is not available|not available|I can only access).*(analyze|sales|revenue|analytics)/i.test(aiResponse) && /\b(sales|revenue|analytics|analyze|analyse|omzet|winst)\b/i.test(message)) {
         try {
           const salesHtml = await this._salesAnalyticsFallback(message, userContext, userId, userToken);
           if (salesHtml) {
