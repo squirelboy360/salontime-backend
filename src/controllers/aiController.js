@@ -86,7 +86,7 @@ HOW TO BE NATURAL AND CONVERSATIONAL:
 
 **POSITIVE AFFIRMATIONS** – When the user expresses satisfaction with a salon or option you just showed ("Perfect", "I love it", "I love this one", "Great", "I'll take it", "This one", "Sounds good", "Yes that one", "Love it", "I like it", "Mooi", "Prima", "Geweldig", etc.), do **NOT** reply with "How can I help you?" or any generic. Acknowledge their choice briefly and offer the natural next step, e.g. "Great choice! Would you like me to help you book an appointment there?" or "Glad you like it! Shall I help you book?" You have the context of which salon from the conversation; use it. Never use the generic in this case.
 
-**APPOINTMENTS & BOOKINGS – YOU HAVE NO BUILT-IN DATA** – You do not have the user's bookings, calendar, or schedule. For **any** question about their appointments ("do I have any today?", "what's on my schedule?", "any bookings?", "do I have an appointment tomorrow?", "wat staat in mijn boeking lijst"), you must **realize you need to fetch**: call make_api_request to GET /api/bookings with upcoming "true" (for today/upcoming) or "false" (for past), and limit as needed. Then answer from the API response in a natural, conversational way. For example: "You have 2 appointments coming up: [list them naturally]" or "You don't have any appointments scheduled for today, but you have one tomorrow at [salon]." Do not guess or reply with a generic; fetch first, then respond naturally.
+**APPOINTMENTS & BOOKINGS – YOU HAVE NO BUILT-IN DATA** – You do not have the user's bookings, calendar, or schedule. For **any** question about their appointments ("do I have any today?", "what's on my schedule?", "any bookings?", "do I have an appointment tomorrow?", "wat staat in mijn boeking lijst", "heb ik vandaag iets op mijn planning staan", "heb ik iets gepland", "staat er iets op mijn planning", "heb ik afspraken vandaag", "wat heb ik vandaag"), you must **realize you need to fetch**: call make_api_request to GET /api/bookings with upcoming "true" (for today/upcoming) or "false" (for past), and limit as needed. Then answer from the API response in a natural, conversational way. For example: "You have 2 appointments coming up: [list them naturally]" or "Je hebt vandaag geen afspraken, maar morgen wel een bij [salon]." or "Nee, je hebt vandaag niets op je planning staan." Do not guess or reply with a generic; fetch first, then respond naturally.
 
 **PAYMENT STATUS QUESTIONS (CRITICAL)** – When the user asks about payment status ("payment status", "was payment successful", "did payment fail", "payment status of my booking", "tech status", "payment tech status", "didn't last booking get paid", "was my last booking paid"), you MUST:
 1. First, fetch their bookings using GET /api/bookings (upcoming="false" for past bookings, "true" for upcoming)
@@ -1404,11 +1404,21 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
             }
             // If they asked about appointments/bookings (today, yesterday, "what about tomorrow", etc.), fetch and show
             // Only if NOT a payment query (payment queries handled above)
-            if (!aiResponse && !isPaymentQuery && /\b(appointment|booking|bookings|plans|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b|do I have|any (plans|appointment)|(my|any) (bookings|appointments)|what about (yesterday|tomorrow|other days)|how about (yesterday|tomorrow|other days)|\bother days\b/i.test(message)) {
+            // Match: appointment, booking, planning, agenda, schedule, afspraak, boeking, "do I have", "heb ik", "staat er", "wat heb ik"
+            const isBookingQuery = !isPaymentQuery && (
+              /\b(appointment|booking|bookings|plans|planning|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b/i.test(message) ||
+              /\b(do I have|heb ik|staat er|wat heb ik|heb ik.*iets|heb ik.*gepland|staat.*op.*planning|heb ik.*vandaag|heb ik.*morgen|heb ik.*gisteren)\b/i.test(message) ||
+              /\b(any (plans|appointment)|(my|any) (bookings|appointments))\b/i.test(message) ||
+              /\b(what about|how about) (yesterday|tomorrow|other days)\b/i.test(message) ||
+              /\bother days\b/i.test(message)
+            );
+            if (!aiResponse && isBookingQuery) {
               try {
                 const html = await this._bookingsFallback(message, userContext, userId, userToken);
                 if (html) aiResponse = html;
-              } catch (e) {}
+              } catch (e) {
+                console.error('Error in bookings fallback:', e);
+              }
             }
             // Else if they asked for salons (best, top rated, etc.) and we have nothing, fetch and show full list
             if (!aiResponse && /\b(best|top|rated|recommend|popular|efficient)\b/i.test(message)) {
@@ -1484,7 +1494,13 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
       );
       const userWantsSalons = /\b(best|top|rated|recommend|popular|efficient|salon)\b/i.test(message) ||
         (/\bbook\b/i.test(message) && /\b(appointment|salon)\b/i.test(message));
-      const userWantsBookings = /\b(appointment|booking|bookings|plans|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b|do I have|any (plans|appointment)|(my|any) (bookings|appointments)|what about (yesterday|tomorrow|other days)|how about (yesterday|tomorrow|other days)|\bother days\b/i.test(message);
+      const userWantsBookings = (
+        /\b(appointment|booking|bookings|plans|planning|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b/i.test(message) ||
+        /\b(do I have|heb ik|staat er|wat heb ik|heb ik.*iets|heb ik.*gepland|staat.*op.*planning|heb ik.*vandaag|heb ik.*morgen|heb ik.*gisteren)\b/i.test(message) ||
+        /\b(any (plans|appointment)|(my|any) (bookings|appointments))\b/i.test(message) ||
+        /\b(what about|how about) (yesterday|tomorrow|other days)\b/i.test(message) ||
+        /\bother days\b/i.test(message)
+      );
       const isOneSpecificThing = /\b(picture|image|photo|location|address|maps|map|navigate|services)\b|where is the picture|show me in maps|in a map|their services|what services|show me their services|what do they offer/i.test(message);
       const isBookingLocation = /\b(location|address|locatie|adres|waar is|where is|geef mij de locatie|give me the location)\b/i.test(message) && 
         (/\b(first|eerste|second|tweede|that|die|this|deze|booking|boeking)\b/i.test(message) || this._getBookingIdFromHistory(historyMessages));
@@ -1615,11 +1631,41 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
         // If parsing fails, continue without GenUI (legacy support)
       }
 
+      // If AI said "let me check" or "even kijken" but didn't actually fetch data, force the fallback
+      const saidCheckingButNoData = aiResponse && (
+        /(even kijken|een momentje|let me check|ik ga kijken|i'll check)/i.test(aiResponse) &&
+        !/<output>/.test(aiResponse) &&
+        !/data-booking-id|data-salon-id/i.test(aiResponse)
+      );
+      if (saidCheckingButNoData && userWantsBookings) {
+        try {
+          const html = await this._bookingsFallback(message, userContext, userId, userToken);
+          if (html) {
+            aiResponse = html;
+            console.log('🔄 AI said "checking" but no data - forced bookings fallback');
+          }
+        } catch (e) {
+          console.error('Error forcing bookings after "checking" message:', e);
+        }
+      }
+
       // Ensure we never save or send an empty response (e.g. after genui strip removed everything)
       if (!aiResponse || !String(aiResponse).trim()) {
-        aiResponse = userContext?.language === 'nl'
-          ? 'Ik begrijp het niet helemaal. Vertel in je eigen woorden wat je zoekt—bijvoorbeeld je afspraken bekijken, een salon zoeken, of iets boeken?'
-          : "I'm not sure what you need. Tell me in your own words—for example, are you looking to check your appointments, find a salon, or book one?";
+        // If they asked about bookings but got empty response, try fallback one more time
+        if (userWantsBookings) {
+          try {
+            const html = await this._bookingsFallback(message, userContext, userId, userToken);
+            if (html) {
+              aiResponse = html;
+              console.log('🔄 Empty response but booking query - forced fallback');
+            }
+          } catch (e) {}
+        }
+        if (!aiResponse || !String(aiResponse).trim()) {
+          aiResponse = userContext?.language === 'nl'
+            ? 'Ik begrijp het niet helemaal. Vertel in je eigen woorden wat je zoekt—bijvoorbeeld je afspraken bekijken, een salon zoeken, of iets boeken?'
+            : "I'm not sure what you need. Tell me in your own words—for example, are you looking to check your appointments, find a salon, or book one?";
+        }
       }
 
       // Never surface the robotic menu-like phrase; if it slipped through, replace with human language

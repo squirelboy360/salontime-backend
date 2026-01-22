@@ -105,15 +105,19 @@ class ReportController {
         return; // No comment to analyze
       }
 
-      // Check if already analyzed
+      // Force re-analysis when manually reported - always analyze to catch missed content
+      console.log(`🤖 Forcing AI re-analysis for review ${reviewId} due to manual report`);
+      
       const { data: existing } = await supabaseAdmin
         .from('reviews')
-        .select('ai_analyzed')
+        .select('ai_analyzed, ai_flag_type')
         .eq('id', reviewId)
         .single();
 
+      // Always re-analyze on manual reports, even if already analyzed
+      // This ensures we catch content that was missed in initial analysis
       if (existing?.ai_analyzed) {
-        return; // Already analyzed
+        console.log(`⚠️ Review ${reviewId} was already analyzed (flagged: ${existing?.ai_flag_type || 'no'}), but forcing re-analysis due to manual report`);
       }
 
       // Use AI service to analyze the comment

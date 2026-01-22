@@ -1226,10 +1226,13 @@ class BookingController {
     console.log(`💵 markAsPaidCash called for booking: ${bookingId}`);
 
     try {
-      // Step 1: Get booking
+      // Step 1: Get booking with service to get price
       const { data: booking, error: bookingError } = await supabaseAdmin
         .from('bookings')
-        .select('*')
+        .select(`
+          *,
+          services(price)
+        `)
         .eq('id', bookingId)
         .single();
 
@@ -1264,11 +1267,24 @@ class BookingController {
       console.log(`💵 Marking booking ${bookingId} as paid cash`);
 
       // Update or create payment record
-      const { data: existingPayment } = await supabaseAdmin
+      const { data: existingPayment, error: paymentCheckError } = await supabaseAdmin
         .from('payments')
-        .select('id')
+        .select('id, amount')
         .eq('booking_id', bookingId)
-        .single();
+        .maybeSingle();
+
+      if (paymentCheckError && paymentCheckError.code !== 'PGRST116') {
+        console.error('❌ Error checking existing payment:', paymentCheckError);
+        throw new AppError('Failed to check payment', 500, 'PAYMENT_CHECK_FAILED');
+      }
+
+      // Get service price for amount (services is an array from the join)
+      const servicePrice = (Array.isArray(booking.services) && booking.services.length > 0) 
+        ? booking.services[0].price 
+        : 0;
+      const amount = existingPayment?.amount || servicePrice || 0;
+      
+      console.log(`💵 Payment amount: ${amount} (from existing: ${existingPayment?.amount}, service: ${servicePrice})`);
 
       if (existingPayment) {
         // Update existing payment
@@ -1276,8 +1292,9 @@ class BookingController {
           .from('payments')
           .update({
             status: 'paid',
-            payment_method: 'cash'
-        })
+            payment_method: 'cash',
+            updated_at: new Date().toISOString()
+          })
           .eq('id', existingPayment.id);
 
         if (updateError) {
@@ -1290,7 +1307,8 @@ class BookingController {
           .from('payments')
           .insert({
             booking_id: bookingId,
-            amount: booking.total_price || 0,
+            amount: amount,
+            currency: 'EUR',
             status: 'paid',
             payment_method: 'cash',
           });

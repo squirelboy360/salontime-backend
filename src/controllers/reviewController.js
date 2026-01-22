@@ -799,15 +799,24 @@ class ReviewController {
   // AI analysis helper (called asynchronously)
   async _analyzeReviewWithAI(reviewId, comment) {
     try {
-      // Check if already analyzed
+      console.log(`🤖 Starting AI analysis for review ${reviewId} with comment: "${comment?.substring(0, 50)}..."`);
+      
+      // Check if already analyzed - skip only if already flagged (to avoid redundant work)
+      // But always analyze on first pass or if not flagged yet
       const { data: existing } = await supabaseAdmin
         .from('reviews')
-        .select('ai_analyzed')
+        .select('ai_analyzed, ai_flag_type')
         .eq('id', reviewId)
         .single();
 
-      if (existing?.ai_analyzed) {
-        return; // Already analyzed
+      if (existing?.ai_analyzed && existing?.ai_flag_type) {
+        console.log(`ℹ️ Review ${reviewId} already analyzed and flagged, skipping re-analysis`);
+        return; // Already flagged, no need to re-analyze
+      }
+
+      // If analyzed but not flagged, or not analyzed yet, proceed with analysis
+      if (existing?.ai_analyzed && !existing?.ai_flag_type) {
+        console.log(`⚠️ Review ${reviewId} was analyzed but not flagged - re-analyzing to ensure accuracy`);
       }
 
       // Use AI service to analyze the comment
