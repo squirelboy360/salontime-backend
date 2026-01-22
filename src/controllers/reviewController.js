@@ -717,20 +717,49 @@ class ReviewController {
     }
 
     try {
-      // Get the review and verify salon ownership
+      console.log(`🔍 Reply to review: reviewId=${reviewId}, userId=${userId}`);
+      
+      // Get the review
       const { data: review, error: reviewError } = await supabaseAdmin
         .from('reviews')
-        .select('*, salon:salons!reviews_salon_id_fkey(owner_id)')
+        .select('id, salon_id')
         .eq('id', reviewId)
         .single();
 
-      if (reviewError || !review) {
+      if (reviewError) {
+        console.error('❌ Review query error:', JSON.stringify(reviewError, null, 2));
         throw new AppError('Review not found', 404, 'REVIEW_NOT_FOUND');
       }
 
+      if (!review) {
+        console.error('❌ Review not found for ID:', reviewId);
+        throw new AppError('Review not found', 404, 'REVIEW_NOT_FOUND');
+      }
+
+      console.log(`✅ Found review: id=${review.id}, salon_id=${review.salon_id}`);
+
+      // Get the salon to verify ownership
+      const { data: salon, error: salonError } = await supabaseAdmin
+        .from('salons')
+        .select('id, owner_id')
+        .eq('id', review.salon_id)
+        .single();
+
+      if (salonError) {
+        console.error('❌ Salon query error:', JSON.stringify(salonError, null, 2));
+        throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
+      }
+
+      if (!salon) {
+        console.error('❌ Salon not found for salon_id:', review.salon_id);
+        throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
+      }
+
+      console.log(`✅ Found salon: id=${salon.id}, owner_id=${salon.owner_id}, userId=${userId}`);
+
       // Check if user is the salon owner
-      const salonOwnerId = review.salon?.owner_id;
-      if (salonOwnerId !== userId) {
+      if (salon.owner_id !== userId) {
+        console.error(`❌ Unauthorized: salon.owner_id=${salon.owner_id} !== userId=${userId}`);
         throw new AppError('You do not have permission to reply to this review', 403, 'UNAUTHORIZED');
       }
 

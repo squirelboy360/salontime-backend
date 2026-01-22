@@ -491,30 +491,48 @@ class SalonController {
           // Fetch all active services to find matching salons
           const { data: allServices, error: servicesError } = await supabase
             .from('services')
-            .select('salon_id, name, category_id, service_categories(name)')
+            .select('salon_id, name, category_id, service_categories(name, slug)')
             .eq('is_active', true);
 
+          if (servicesError) {
+            console.error('❌ Error fetching services for filtering:', servicesError);
+          }
+
           if (!servicesError && allServices) {
-            const serviceNames = allServiceFilters.map(s => s.toLowerCase());
+            const serviceNames = allServiceFilters.map(s => s.toLowerCase().trim());
             const matchingSalonIds = new Set();
+            
+            console.log(`🔍 Service filtering: Looking for ${serviceNames.join(', ')} in ${allServices.length} services`);
             
             allServices.forEach(svc => {
               const svcName = (svc.name || '').toLowerCase();
               const svcCategory = (svc.service_categories?.name || '').toLowerCase();
+              const svcCategorySlug = (svc.service_categories?.slug || '').toLowerCase();
+              
               serviceNames.forEach(filterName => {
-                if (svcName.includes(filterName) || svcCategory.includes(filterName)) {
+                // Check service name, category name, or category slug
+                if (svcName.includes(filterName) || 
+                    svcCategory.includes(filterName) || 
+                    svcCategorySlug.includes(filterName)) {
                   matchingSalonIds.add(svc.salon_id);
+                  console.log(`✅ Match found: Service "${svc.name}" (category: ${svc.service_categories?.name || 'none'}, slug: ${svcCategorySlug || 'none'}) matches "${filterName}" for salon ${svc.salon_id}`);
                 }
               });
             });
+            
+            console.log(`🔍 Found ${matchingSalonIds.size} matching salons for service filter`);
             
             if (matchingSalonIds.size > 0) {
               serviceFilteredSalonIds = Array.from(matchingSalonIds);
               query = query.in('id', serviceFilteredSalonIds);
             } else {
               // No matching services, return empty result
+              console.log('⚠️ No matching services found, returning empty result');
               query = query.eq('id', '00000000-0000-0000-0000-000000000000');
             }
+          } else if (!allServices) {
+            console.log('⚠️ No services found in database');
+            query = query.eq('id', '00000000-0000-0000-0000-000000000000');
           }
         }
       }
