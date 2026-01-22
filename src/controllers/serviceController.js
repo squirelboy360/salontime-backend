@@ -1,5 +1,5 @@
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
-const { supabase } = require('../config/database');
+const { supabase, getAuthenticatedClient } = require('../config/database');
 
 class ServiceController {
   // Get all services for a salon
@@ -99,7 +99,10 @@ class ServiceController {
         is_active
       });
       
-      const { data: service, error } = await supabase
+      // Use authenticated client for RLS
+      const authenticatedSupabase = getAuthenticatedClient(req.token);
+      
+      const { data: service, error } = await authenticatedSupabase
         .from('services')
         .insert({
           salon_id: salonId,
@@ -174,39 +177,50 @@ class ServiceController {
       console.log('📝 Updating service:', serviceId, 'with data:', updateData);
       console.log('📝 Salon ID:', salonId);
       
-      const { data: service, error } = await supabase
+      // Use authenticated client for RLS
+      const authenticatedSupabase = getAuthenticatedClient(req.token);
+      
+      // First check if service exists and belongs to this salon
+      const { data: existingService, error: checkError } = await authenticatedSupabase
+        .from('services')
+        .select('id, salon_id')
+        .eq('id', serviceId)
+        .eq('salon_id', salonId)
+        .single();
+
+      if (checkError || !existingService) {
+        console.error('❌ Service not found or access denied:', checkError);
+        throw new AppError('Service not found or access denied', 404, 'SERVICE_NOT_FOUND');
+      }
+
+      // Update the service
+      const { error: updateError } = await authenticatedSupabase
         .from('services')
         .update(updateData)
         .eq('id', serviceId)
-        .eq('salon_id', salonId)
+        .eq('salon_id', salonId);
+
+      if (updateError) {
+        console.error('❌ Service update error:', updateError);
+        console.error('❌ Error code:', updateError.code);
+        console.error('❌ Error message:', updateError.message);
+        throw new AppError(`Service update failed: ${updateError.message || JSON.stringify(updateError)}`, 500, 'UPDATE_FAILED');
+      }
+
+      // Fetch the updated service
+      const { data: service, error: fetchError } = await authenticatedSupabase
+        .from('services')
         .select(`
           *,
           category:service_categories(*)
         `)
+        .eq('id', serviceId)
+        .eq('salon_id', salonId)
         .single();
 
-      if (error || !service) {
-        console.error('❌ Service update error:', error);
-        console.error('❌ Service ID:', serviceId, 'Salon ID:', salonId);
-        console.error('❌ Update data:', updateData);
-        if (error) {
-          console.error('❌ Error code:', error.code);
-          console.error('❌ Error message:', error.message);
-          console.error('❌ Error hint:', error.hint);
-          throw new AppError(`Service update failed: ${error.message || JSON.stringify(error)}`, 404, 'SERVICE_NOT_FOUND');
-        }
-        // Check if service exists but doesn't belong to this salon
-        const { data: existingService } = await supabase
-          .from('services')
-          .select('id, salon_id')
-          .eq('id', serviceId)
-          .single();
-        if (existingService) {
-          console.error('❌ Service exists but salon_id mismatch:', existingService.salon_id, 'vs', salonId);
-        } else {
-          console.error('❌ Service does not exist:', serviceId);
-        }
-        throw new AppError('Service not found or update failed', 404, 'SERVICE_NOT_FOUND');
+      if (fetchError || !service) {
+        console.error('❌ Failed to fetch updated service:', fetchError);
+        throw new AppError('Service updated but failed to fetch updated data', 500, 'FETCH_FAILED');
       }
 
       res.status(200).json({
@@ -240,14 +254,18 @@ class ServiceController {
     const salonId = salon.id;
 
     try {
-      const { error } = await supabase
+      // Use authenticated client for RLS
+      const authenticatedSupabase = getAuthenticatedClient(req.token);
+      
+      const { error } = await authenticatedSupabase
         .from('services')
         .delete()
         .eq('id', serviceId)
         .eq('salon_id', salonId);
 
       if (error) {
-        throw new AppError('Failed to delete service', 500, 'DELETE_FAILED');
+        console.error('❌ Service delete error:', error);
+        throw new AppError(`Failed to delete service: ${error.message}`, 500, 'DELETE_FAILED');
       }
 
       res.status(200).json({

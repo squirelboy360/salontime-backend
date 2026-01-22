@@ -76,8 +76,33 @@ exports.updateBusinessHours = async (req, res) => {
       }
     }
 
-    // Update business hours
-    const { data: updatedSalon, error: updateError } = await supabase
+    // Use authenticated client for RLS
+    const authenticatedSupabase = getAuthenticatedClient(req.token);
+    
+    // Verify user owns this salon
+    const { data: salon, error: salonError } = await authenticatedSupabase
+      .from('salons')
+      .select('id, owner_id')
+      .eq('id', salonId)
+      .single();
+
+    if (salonError || !salon) {
+      return res.status(404).json({
+        success: false,
+        message: 'Salon not found'
+      });
+    }
+
+    // Check if user owns the salon (req.user should be set by authenticateToken middleware)
+    if (req.user && salon.owner_id !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to update this salon'
+      });
+    }
+
+    // Update business hours using authenticated client
+    const { data: updatedSalon, error: updateError } = await authenticatedSupabase
       .from('salons')
       .update({ 
         business_hours: business_hours,
@@ -88,9 +113,11 @@ exports.updateBusinessHours = async (req, res) => {
       .single();
 
     if (updateError || !updatedSalon) {
-      return res.status(404).json({
+      console.error('Error updating business hours:', updateError);
+      return res.status(500).json({
         success: false,
-        message: 'Salon not found'
+        message: 'Failed to update business hours',
+        error: updateError?.message
       });
     }
 
