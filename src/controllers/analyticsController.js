@@ -264,6 +264,8 @@ class AnalyticsController {
       rating: review.rating,
       comment: review.comment,
       created_at: review.created_at,
+      owner_reply: review.owner_reply,
+      owner_reply_at: review.owner_reply_at,
       client: {
         name: `${review.user_profiles?.first_name || ''} ${review.user_profiles?.last_name || ''}`.trim(),
         avatar: review.user_profiles?.avatar_url
