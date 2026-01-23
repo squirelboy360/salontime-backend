@@ -169,7 +169,20 @@ exports.updateBusinessHours = async (req, res) => {
     }
 
     console.log('✅ Business hours updated successfully');
-    console.log('✅ Updated business hours:', JSON.stringify(updatedSalon.business_hours, null, 2));
+    console.log('✅ Updated business hours from DB:', JSON.stringify(updatedSalon.business_hours, null, 2));
+
+    // Verify the update actually persisted by fetching again
+    const { data: verifySalon, error: verifyError } = await authenticatedSupabase
+      .from('salons')
+      .select('business_hours')
+      .eq('id', salonId)
+      .single();
+
+    if (verifyError) {
+      console.error('⚠️ Warning: Could not verify update:', verifyError);
+    } else {
+      console.log('✅ Verified business hours in DB:', JSON.stringify(verifySalon.business_hours, null, 2));
+    }
 
     res.json({
       success: true,
