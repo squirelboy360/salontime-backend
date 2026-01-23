@@ -114,6 +114,10 @@ exports.updateBusinessHours = async (req, res) => {
       });
     }
 
+    // Log what we're about to save
+    console.log('💾 Updating business hours for salon:', salonId);
+    console.log('💾 Business hours data:', JSON.stringify(business_hours, null, 2));
+
     // Update business hours using authenticated client
     const { data: updatedSalon, error: updateError } = await authenticatedSupabase
       .from('salons')
@@ -126,13 +130,16 @@ exports.updateBusinessHours = async (req, res) => {
       .single();
 
     if (updateError || !updatedSalon) {
-      console.error('Error updating business hours:', updateError);
+      console.error('❌ Error updating business hours:', updateError);
       return res.status(500).json({
         success: false,
         message: 'Failed to update business hours',
         error: updateError?.message
       });
     }
+
+    console.log('✅ Business hours updated successfully');
+    console.log('✅ Updated business hours:', JSON.stringify(updatedSalon.business_hours, null, 2));
 
     res.json({
       success: true,
