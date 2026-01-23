@@ -295,7 +295,6 @@ class SalonController {
         phone,
         email,
         website,
-        business_hours,
         updated_at: new Date().toISOString()
       };
 
@@ -303,6 +302,11 @@ class SalonController {
       if (state !== undefined) updateData.state = state;
       if (amenities !== undefined) updateData.amenities = amenities;
       if (images !== undefined) updateData.images = images;
+      
+      // Don't update business_hours here - they are managed separately via the business hours endpoint
+      // Only include business_hours if explicitly provided (for backward compatibility)
+      // But prefer to not send it to avoid overwriting recent updates
+      // if (business_hours !== undefined) updateData.business_hours = business_hours;
 
       const { data: salon, error } = await supabaseAdmin
         .from('salons')
