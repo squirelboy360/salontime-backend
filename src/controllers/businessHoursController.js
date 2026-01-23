@@ -18,10 +18,23 @@ exports.getBusinessHours = async (req, res) => {
       });
     }
 
+    // Normalize business hours - remove old 'close' field and ensure consistent format
+    const businessHours = salon.business_hours || {};
+    const normalizedBusinessHours = {};
+    for (const [day, hours] of Object.entries(businessHours)) {
+      if (hours && typeof hours === 'object') {
+        normalizedBusinessHours[day] = {
+          opening: hours.opening || null,
+          closing: hours.closing || hours.close || null, // Use closing, fallback to close
+          closed: hours.closed === true || hours.closed === 'true'
+        };
+      }
+    }
+
     res.json({
       success: true,
       data: {
-        business_hours: salon.business_hours || {}
+        business_hours: normalizedBusinessHours
       }
     });
   } catch (error) {
@@ -114,15 +127,32 @@ exports.updateBusinessHours = async (req, res) => {
       });
     }
 
+    // Normalize business hours - remove old 'close' field and ensure consistent format
+    const normalizedBusinessHours = {};
+    for (const [day, hours] of Object.entries(business_hours)) {
+      if (hours && typeof hours === 'object') {
+        normalizedBusinessHours[day] = {
+          opening: hours.opening || null,
+          closing: hours.closing || hours.close || null, // Use closing, fallback to close
+          closed: hours.closed === true || hours.closed === 'true'
+        };
+        // Remove old 'close' field if it exists
+        if (normalizedBusinessHours[day].closing && normalizedBusinessHours[day].closing === hours.close) {
+          // Already normalized
+        }
+      }
+    }
+
     // Log what we're about to save
     console.log('💾 Updating business hours for salon:', salonId);
-    console.log('💾 Business hours data:', JSON.stringify(business_hours, null, 2));
+    console.log('💾 Original business hours data:', JSON.stringify(business_hours, null, 2));
+    console.log('💾 Normalized business hours data:', JSON.stringify(normalizedBusinessHours, null, 2));
 
     // Update business hours using authenticated client
     const { data: updatedSalon, error: updateError } = await authenticatedSupabase
       .from('salons')
       .update({ 
-        business_hours: business_hours,
+        business_hours: normalizedBusinessHours,
         updated_at: new Date().toISOString()
       })
       .eq('id', salonId)
