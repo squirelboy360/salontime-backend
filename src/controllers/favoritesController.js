@@ -40,7 +40,9 @@ const getFavorites = asyncHandler(async (req, res) => {
           featured_until,
           trending_score,
           view_count,
-          business_hours
+          business_hours,
+          latitude,
+          longitude
         )
       `)
       .eq('user_id', userId)
@@ -68,20 +70,10 @@ const getFavorites = asyncHandler(async (req, res) => {
 
     // Use coordinates from database - DO NOT geocode on read requests
     // Salons already have coordinates stored from creation/update
-    const favoritesWithCoords = favorites;
-
-      res.status(200).json({
-        success: true,
-        data: favoritesWithCoords
-      });
-    } catch (geocodeError) {
-      console.error('⚠️ Error geocoding favorites, returning without geocoding:', geocodeError);
-      // Return favorites without geocoding if geocoding fails
-      res.status(200).json({
-        success: true,
-        data: favorites
-      });
-    }
+    res.status(200).json({
+      success: true,
+      data: favorites
+    });
   } catch (error) {
     console.error('❌ Error in getFavorites:', error);
     if (error instanceof AppError) {
@@ -207,4 +199,3 @@ module.exports = {
   removeFavorite,
   checkFavorite
 };
-
