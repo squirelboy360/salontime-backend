@@ -42,13 +42,24 @@ async function backfillSalonCoordinates() {
 
         console.log(`\n🌍 Geocoding: ${salon.business_name} (${salon.address}, ${salon.city})`);
 
-        // Geocode the address
-        const coords = await geocodeAddress(
+        // Try geocoding with full address first
+        let coords = await geocodeAddress(
           salon.address || '',
           salon.city || '',
           salon.zip_code || '',
           salon.country || 'NL'
         );
+
+        // If full address fails, try with just city and country (fallback for fake addresses)
+        if (!coords || !coords.latitude || !coords.longitude) {
+          console.log(`⚠️ Full address geocoding failed, trying city-only for ${salon.business_name}...`);
+          coords = await geocodeAddress(
+            '', // No street address
+            salon.city || '',
+            '', // No zip code
+            salon.country || 'NL'
+          );
+        }
 
         if (coords && coords.latitude && coords.longitude) {
           // Update salon with coordinates
@@ -69,7 +80,7 @@ async function backfillSalonCoordinates() {
             successCount++;
           }
         } else {
-          console.log(`⚠️ Could not geocode ${salon.business_name}`);
+          console.log(`⚠️ Could not geocode ${salon.business_name} (tried full address and city-only)`);
           failCount++;
         }
 
