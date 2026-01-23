@@ -5,18 +5,23 @@ exports.getBusinessHours = async (req, res) => {
   const { salonId } = req.params;
 
   try {
+    console.log('📋 GET business hours for salon:', salonId);
     const { data: salon, error } = await supabase
       .from('salons')
-      .select('business_hours')
+      .select('business_hours, updated_at')
       .eq('id', salonId)
       .single();
 
     if (error || !salon) {
+      console.error('❌ Error fetching business hours:', error);
       return res.status(404).json({
         success: false,
         message: 'Salon not found'
       });
     }
+
+    console.log('📋 Raw business hours from DB:', JSON.stringify(salon.business_hours, null, 2));
+    console.log('📋 Last updated:', salon.updated_at);
 
     // Normalize business hours - remove old 'close' field and ensure consistent format
     const businessHours = salon.business_hours || {};
@@ -30,6 +35,8 @@ exports.getBusinessHours = async (req, res) => {
         };
       }
     }
+
+    console.log('📋 Normalized business hours:', JSON.stringify(normalizedBusinessHours, null, 2));
 
     res.json({
       success: true,

@@ -239,6 +239,22 @@ class SalonController {
         throw new AppError('No salon found for this user', 404, 'SALON_NOT_FOUND');
       }
 
+      // Normalize business hours - remove old 'close' field and ensure consistent format
+      if (salon.business_hours && typeof salon.business_hours === 'object') {
+        const businessHours = salon.business_hours;
+        const normalizedBusinessHours = {};
+        for (const [day, hours] of Object.entries(businessHours)) {
+          if (hours && typeof hours === 'object') {
+            normalizedBusinessHours[day] = {
+              opening: hours.opening || null,
+              closing: hours.closing || hours.close || null, // Use closing, fallback to close
+              closed: hours.closed === true || hours.closed === 'true'
+            };
+          }
+        }
+        salon.business_hours = normalizedBusinessHours;
+      }
+
       res.status(200).json({
         success: true,
         data: { salon }
