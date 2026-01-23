@@ -33,7 +33,10 @@ class OnboardingController {
       
       // Stripe Information
       bank_country = country,
-      currency
+      currency,
+      // Coordinates (optional - from frontend)
+      latitude: providedLatitude,
+      longitude: providedLongitude
     } = req.body;
 
     if (!business_name || !full_name) {
@@ -63,12 +66,19 @@ class OnboardingController {
         throw new AppError('Failed to update user profile', 500, 'PROFILE_UPDATE_FAILED');
       }
 
-      // 2. Geocode address to get coordinates
+      // 2. Get coordinates: use provided coordinates from frontend, or geocode if not provided
       const { geocodeAddress } = require('../utils/geocoding');
       let latitude = null;
       let longitude = null;
       
-      if (street_address && city) {
+      // If frontend provided coordinates, use them
+      if (providedLatitude !== undefined && providedLongitude !== undefined && 
+          !isNaN(parseFloat(providedLatitude)) && !isNaN(parseFloat(providedLongitude))) {
+        latitude = parseFloat(providedLatitude);
+        longitude = parseFloat(providedLongitude);
+        console.log('✅ Using coordinates from frontend:', latitude, longitude);
+      } else if (street_address && city) {
+        // Otherwise, geocode the address
         console.log('🌍 Geocoding address for onboarding...');
         // Build full address string for better geocoding
         const fullAddress = `${street_address}, ${zip_code} ${city}, ${country}`;

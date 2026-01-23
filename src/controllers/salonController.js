@@ -17,7 +17,9 @@ class SalonController {
       country,
       phone,
       email,
-      business_hours
+      business_hours,
+      latitude: providedLatitude,
+      longitude: providedLongitude
     } = req.body;
 
     // Validate required fields
@@ -60,12 +62,19 @@ class SalonController {
         throw new AppError('User already has a salon registered', 409, 'SALON_ALREADY_EXISTS');
       }
 
-      // Geocode address to get coordinates
+      // Get coordinates: use provided coordinates from frontend, or geocode if not provided
       const { geocodeAddress } = require('../utils/geocoding');
       let latitude = null;
       let longitude = null;
       
-      if (address && city) {
+      // If frontend provided coordinates, use them
+      if (providedLatitude !== undefined && providedLongitude !== undefined && 
+          !isNaN(parseFloat(providedLatitude)) && !isNaN(parseFloat(providedLongitude))) {
+        latitude = parseFloat(providedLatitude);
+        longitude = parseFloat(providedLongitude);
+        console.log('✅ Using coordinates from frontend:', latitude, longitude);
+      } else if (address && city) {
+        // Otherwise, geocode the address
         console.log('🌍 Geocoding address for salon creation...');
         const coords = await geocodeAddress(address, city, zip_code, country || 'NL');
         if (coords) {
@@ -299,15 +308,24 @@ class SalonController {
       website,
       business_hours,
       amenities,
-      images
+      images,
+      latitude: providedLatitude,
+      longitude: providedLongitude
     } = req.body;
 
     try {
-      // Geocode address if address or city changed
+      // Get coordinates: use provided coordinates from frontend, or geocode if not provided
       let latitude = undefined;
       let longitude = undefined;
       
-      if (address !== undefined || city !== undefined) {
+      // If frontend provided coordinates, use them
+      if (providedLatitude !== undefined && providedLongitude !== undefined && 
+          !isNaN(parseFloat(providedLatitude)) && !isNaN(parseFloat(providedLongitude))) {
+        latitude = parseFloat(providedLatitude);
+        longitude = parseFloat(providedLongitude);
+        console.log('✅ Using coordinates from frontend:', latitude, longitude);
+      } else if (address !== undefined || city !== undefined) {
+        // Otherwise, geocode address if address or city changed
         // Get current salon to use existing values if not provided
         const { data: currentSalon } = await supabaseAdmin
           .from('salons')
