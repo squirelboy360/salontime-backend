@@ -60,6 +60,23 @@ class SalonController {
         throw new AppError('User already has a salon registered', 409, 'SALON_ALREADY_EXISTS');
       }
 
+      // Geocode address to get coordinates
+      const { geocodeAddress } = require('../utils/geocoding');
+      let latitude = null;
+      let longitude = null;
+      
+      if (address && city) {
+        console.log('🌍 Geocoding address for salon creation...');
+        const coords = await geocodeAddress(address, city, zip_code, country || 'NL');
+        if (coords) {
+          latitude = coords.latitude;
+          longitude = coords.longitude;
+          console.log('✅ Geocoded coordinates:', latitude, longitude);
+        } else {
+          console.log('⚠️ Geocoding failed, salon will be created without coordinates');
+        }
+      }
+
       // Create salon record (use admin client to bypass RLS)
       const { data: salon, error } = await supabaseAdmin
         .from('salons')
@@ -74,7 +91,9 @@ class SalonController {
           country: country || 'US',
           phone,
           email,
-          business_hours
+          business_hours,
+          latitude,
+          longitude
         }])
         .select()
         .single();
@@ -286,6 +305,37 @@ class SalonController {
     } = req.body;
 
     try {
+      // Geocode address if address or city changed
+      let latitude = undefined;
+      let longitude = undefined;
+      
+      if (address !== undefined || city !== undefined) {
+        // Get current salon to use existing values if not provided
+        const { data: currentSalon } = await supabaseAdmin
+          .from('salons')
+          .select('address, city, zip_code, country')
+          .eq('owner_id', req.user.id)
+          .single();
+        
+        const addressToGeocode = address !== undefined ? address : (currentSalon?.address || '');
+        const cityToGeocode = city !== undefined ? city : (currentSalon?.city || '');
+        const zipCodeToGeocode = req.body.zip_code !== undefined ? req.body.zip_code : (currentSalon?.zip_code || '');
+        const countryToGeocode = req.body.country !== undefined ? req.body.country : (currentSalon?.country || 'NL');
+        
+        if (addressToGeocode && cityToGeocode) {
+          console.log('🌍 Geocoding address for salon update...');
+          const { geocodeAddress } = require('../utils/geocoding');
+          const coords = await geocodeAddress(addressToGeocode, cityToGeocode, zipCodeToGeocode, countryToGeocode);
+          if (coords) {
+            latitude = coords.latitude;
+            longitude = coords.longitude;
+            console.log('✅ Geocoded coordinates:', latitude, longitude);
+          } else {
+            console.log('⚠️ Geocoding failed, coordinates will not be updated');
+          }
+        }
+      }
+
       const updateData = {
         business_name,
         description,
@@ -297,6 +347,10 @@ class SalonController {
         website,
         updated_at: new Date().toISOString()
       };
+
+      // Add coordinates if geocoded
+      if (latitude !== undefined) updateData.latitude = latitude;
+      if (longitude !== undefined) updateData.longitude = longitude;
 
       // Add optional fields if provided
       if (state !== undefined) updateData.state = state;
@@ -698,11 +752,11 @@ class SalonController {
         throw new AppError(`Failed to search salons: ${error.message}`, 500, 'SALON_SEARCH_FAILED');
       }
 
-      // Add coordinates if missing (geocoding)
+      // Add coordinates if missing (geocoding) - now async and works globally
       let salonsWithCoords = salons || [];
       try {
-      const { geocodeSalons } = require('../utils/geocoding');
-        salonsWithCoords = geocodeSalons(salons || []);
+        const { geocodeSalons } = require('../utils/geocoding');
+        salonsWithCoords = await geocodeSalons(salons || []);
       } catch (geocodeError) {
         console.warn('⚠️ Geocoding error (non-fatal):', geocodeError.message);
         // Continue with salons as-is if geocoding fails
@@ -1281,7 +1335,7 @@ class SalonController {
 
       // Add coordinates based on city
       const { geocodeSalons } = require('../utils/geocoding');
-      const salonsWithCoords = geocodeSalons(salons || []);
+      const salonsWithCoords = await geocodeSalons(salons || []);
 
       res.json({
         success: true,
@@ -1312,7 +1366,7 @@ class SalonController {
 
       // Add coordinates based on city
       const { geocodeSalons } = require('../utils/geocoding');
-      const salonsWithCoords = geocodeSalons(salons || []);
+      const salonsWithCoords = await geocodeSalons(salons || []);
 
       res.json({
         success: true,

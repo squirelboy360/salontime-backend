@@ -69,14 +69,14 @@ const getFavorites = asyncHandler(async (req, res) => {
     // Add coordinates to favorite salons (safely handle null/undefined)
     try {
       const { geocodeSalons } = require('../utils/geocoding');
-      const favoritesWithCoords = favorites.map(fav => {
+      const favoritesWithCoords = await Promise.all(favorites.map(async (fav) => {
         try {
           if (fav.salons) {
             const salonArray = Array.isArray(fav.salons) ? fav.salons : [fav.salons];
             // Filter out null/undefined salons
             const validSalons = salonArray.filter(s => s != null);
             if (validSalons.length > 0) {
-              const geocodedSalons = geocodeSalons(validSalons);
+              const geocodedSalons = await geocodeSalons(validSalons);
               return {
                 ...fav,
                 salons: geocodedSalons[0] || validSalons[0] || fav.salons
@@ -89,7 +89,7 @@ const getFavorites = asyncHandler(async (req, res) => {
           // Return favorite without geocoding if there's an error
           return fav;
         }
-      });
+      }));
 
       res.status(200).json({
         success: true,

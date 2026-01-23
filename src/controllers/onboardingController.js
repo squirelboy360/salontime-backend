@@ -63,7 +63,26 @@ class OnboardingController {
         throw new AppError('Failed to update user profile', 500, 'PROFILE_UPDATE_FAILED');
       }
 
-      // 2. Create salon profile
+      // 2. Geocode address to get coordinates
+      const { geocodeAddress } = require('../utils/geocoding');
+      let latitude = null;
+      let longitude = null;
+      
+      if (street_address && city) {
+        console.log('🌍 Geocoding address for onboarding...');
+        // Build full address string for better geocoding
+        const fullAddress = `${street_address}, ${zip_code} ${city}, ${country}`;
+        const coords = await geocodeAddress(street_address, city, zip_code, country);
+        if (coords) {
+          latitude = coords.latitude;
+          longitude = coords.longitude;
+          console.log('✅ Geocoded coordinates:', latitude, longitude);
+        } else {
+          console.log('⚠️ Geocoding failed, salon will be created without coordinates');
+        }
+      }
+
+      // 3. Create salon profile
       const { data: salonData, error: salonError } = await supabase
         .from('salons')
         .insert([{
@@ -82,6 +101,8 @@ class OnboardingController {
           website,
           business_hours,
           amenities,
+          latitude,
+          longitude,
           is_active: false, // Will be activated after Stripe setup
           verification_status: 'pending'
         }])
