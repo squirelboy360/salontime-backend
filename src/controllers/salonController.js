@@ -217,13 +217,11 @@ class SalonController {
         throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
       }
 
-      // Add coordinates based on city
-      const { geocodeSalon } = require('../utils/geocoding');
-      const salonWithCoords = geocodeSalon(salon);
-
+      // Use coordinates from database - DO NOT geocode on read requests
+      // Coordinates are stored during salon creation/update
       res.status(200).json({
         success: true,
-        data: salonWithCoords  // Return salon data directly, not wrapped in { salon: ... }
+        data: salon  // Return salon data directly, not wrapped in { salon: ... }
       });
 
     } catch (error) {
@@ -752,16 +750,9 @@ class SalonController {
         throw new AppError(`Failed to search salons: ${error.message}`, 500, 'SALON_SEARCH_FAILED');
       }
 
-      // Add coordinates if missing (geocoding) - now async and works globally
-      let salonsWithCoords = salons || [];
-      try {
-        const { geocodeSalons } = require('../utils/geocoding');
-        salonsWithCoords = await geocodeSalons(salons || []);
-      } catch (geocodeError) {
-        console.warn('⚠️ Geocoding error (non-fatal):', geocodeError.message);
-        // Continue with salons as-is if geocoding fails
-        salonsWithCoords = salons || [];
-      }
+      // Use coordinates from database - DO NOT geocode on read requests
+      // Geocoding only happens during salon creation/update
+      const salonsWithCoords = salons || [];
 
       // Calculate exact distances and apply final distance filter (for accuracy)
       let filteredSalons = salonsWithCoords;
@@ -1333,13 +1324,11 @@ class SalonController {
         throw error;
       }
 
-      // Add coordinates based on city
-      const { geocodeSalons } = require('../utils/geocoding');
-      const salonsWithCoords = await geocodeSalons(salons || []);
-
+      // Use coordinates from database - DO NOT geocode on read requests
+      // Coordinates are stored during salon creation/update
       res.json({
         success: true,
-        data: salonsWithCoords
+        data: salons || []
       });
     } catch (error) {
       if (error instanceof AppError) {
@@ -1364,13 +1353,11 @@ class SalonController {
         throw error;
       }
 
-      // Add coordinates based on city
-      const { geocodeSalons } = require('../utils/geocoding');
-      const salonsWithCoords = await geocodeSalons(salons || []);
-
+      // Use coordinates from database - DO NOT geocode on read requests
+      // Coordinates are stored during salon creation/update
       res.json({
         success: true,
-        data: salonsWithCoords
+        data: salons || []
       });
     } catch (error) {
       if (error instanceof AppError) {
