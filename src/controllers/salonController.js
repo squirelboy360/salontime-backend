@@ -740,8 +740,16 @@ class SalonController {
       // Apply limit and offset at DB level
       // Note: We fetch more than needed to account for post-filtering (distance, open_now)
       // This ensures we have enough results after final filtering
-      const fetchLimit = Math.max(validLimit * 3, 150); // Fetch 3x the limit or min 150
-      query = query.limit(fetchLimit);
+      // For pagination with post-filtering, we use a progressive fetch strategy:
+      // - Fetch a large enough batch to cover multiple pages
+      // - Filter the results, then paginate from the filtered set
+      // Since filtering reduces count, we fetch more upfront
+      const bufferMultiplier = 5; // Fetch 5x to account for filtering reducing results
+      const fetchLimit = Math.max(validLimit * bufferMultiplier, 200); // Fetch 5x the limit or min 200
+      // Start fetching from the beginning for early pages, then progressively increase offset
+      // This ensures we have enough filtered results for pagination
+      const fetchOffset = Math.max(0, Math.floor(offset / bufferMultiplier) * validLimit);
+      query = query.range(fetchOffset, fetchOffset + fetchLimit - 1);
 
       const { data: salons, error } = await query;
 
@@ -815,12 +823,27 @@ class SalonController {
       }
 
       // Apply pagination after all filtering
-      const paginatedSalons = filteredSalons.slice(offset, offset + validLimit);
-      const total = filteredSalons.length;
-      const hasMore = (offset + validLimit) < filteredSalons.length;
+      // Since we fetched from fetchOffset, we need to adjust the slice to get the correct page
+      // The filtered results represent salons starting from fetchOffset in the database
+      // We need to calculate which portion of filtered results corresponds to the requested page
+      const relativeOffset = offset - fetchOffset;
+      const paginatedSalons = relativeOffset >= 0 && relativeOffset < filteredSalons.length
+        ? filteredSalons.slice(relativeOffset, relativeOffset + validLimit)
+        : []; // Return empty if offset is beyond what we fetched
+      
+      // For hasMore, we check if we got a full page and if there might be more
+      // Since we're filtering after fetching, we can't know the true total
+      // If we got fewer results than requested, we've likely reached the end
+      // If we got a full page and we're near the end of our fetched batch, fetch more next time
+      const isNearEndOfBatch = (relativeOffset + validLimit) >= (filteredSalons.length * 0.8);
+      const hasMore = paginatedSalons.length === validLimit && (isNearEndOfBatch || filteredSalons.length >= (relativeOffset + validLimit));
+      
+      // Estimate total (not accurate due to post-filtering, but useful for UI)
+      // If we have more, estimate there are more pages
+      const estimatedTotal = hasMore ? (offset + validLimit) + 100 : Math.max(filteredSalons.length + fetchOffset, offset + paginatedSalons.length);
 
-      console.log(`✅ Found ${filteredSalons.length} salons with DB-level filters`);
-      console.log(`📄 Returning ${paginatedSalons.length} salons for page ${pageNum} (total: ${total}, hasMore: ${hasMore})`);
+      console.log(`✅ Found ${filteredSalons.length} salons after filtering (fetched from offset ${fetchOffset})`);
+      console.log(`📄 Returning ${paginatedSalons.length} salons for page ${pageNum} (offset: ${offset}, relativeOffset: ${relativeOffset}, hasMore: ${hasMore})`);
 
       res.status(200).json({
         success: true,
@@ -828,7 +851,7 @@ class SalonController {
         pagination: {
           page: pageNum,
           limit: validLimit,
-          total: total,
+          total: estimatedTotal,
           hasMore: hasMore
         }
       });

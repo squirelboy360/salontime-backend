@@ -547,9 +547,9 @@ class SupabaseService {
       if (error.code === 'PGRST116') {
         // Settings don't exist, create them first
           console.log('📝 Creating default settings for user...');
-        await this.createUserSettings(userId);
+        await this.createUserSettings(userId, accessToken);
         // Try update again
-        return await this.updateUserSettings(userId, updates);
+        return await this.updateUserSettings(userId, updates, accessToken);
       }
         throw new AppError(`Failed to update user settings: ${error.message}`, 500, 'DATABASE_ERROR');
     }

@@ -86,11 +86,22 @@ class RecommendationService {
         match_count: limit
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error in match_salons RPC:', error);
+        // If RPC function doesn't exist or embeddings aren't set up, return empty array
+        // This allows the calling code to fall back to other methods
+        if (error.code === '42883' || error.message?.includes('function') || error.message?.includes('does not exist')) {
+          console.warn('⚠️ match_salons RPC function not available, returning empty recommendations');
+          return [];
+        }
+        throw error;
+      }
 
-      return recommendations;
+      return recommendations || [];
     } catch (error) {
-      throw new AppError('Failed to get recommendations', 500, 'RECOMMENDATION_FAILED');
+      console.error('❌ Error in getRecommendations:', error);
+      // Return empty array instead of throwing to allow fallback
+      return [];
     }
   });
 
@@ -173,20 +184,45 @@ class RecommendationService {
   getNearbyRecommendations = asyncHandler(async (userId, latitude, longitude, radius = 10, limit = 10) => {
     try {
       // Get personalized recommendations
-      const recommendations = await this.getRecommendations(userId, limit);
+      let recommendations;
+      try {
+        recommendations = await this.getRecommendations(userId, limit * 2); // Get more to filter by location
+      } catch (recError) {
+        console.error('❌ Error getting personalized recommendations, falling back to nearby salons:', recError);
+        // Fallback: get nearby salons directly from database
+        const { data: nearbySalons, error: nearbyError } = await supabase
+          .from('salons')
+          .select('*')
+          .eq('is_active', true)
+          .not('latitude', 'is', null)
+          .not('longitude', 'is', null)
+          .limit(limit * 2);
+        
+        if (nearbyError) {
+          console.error('❌ Error fetching nearby salons as fallback:', nearbyError);
+          return [];
+        }
+        
+        recommendations = nearbySalons || [];
+      }
 
       // Filter by location
-      const nearbyRecommendations = recommendations.filter(salon => {
-        const distance = this.calculateDistance(
-          latitude, longitude,
-          salon.latitude, salon.longitude
-        );
-        return distance <= radius;
-      });
+      const nearbyRecommendations = recommendations
+        .filter(salon => {
+          if (!salon.latitude || !salon.longitude) return false;
+          const distance = this.calculateDistance(
+            latitude, longitude,
+            salon.latitude, salon.longitude
+          );
+          return distance <= radius;
+        })
+        .slice(0, limit); // Limit to requested amount
 
       return nearbyRecommendations;
     } catch (error) {
-      throw new AppError('Failed to get nearby recommendations', 500, 'NEARBY_RECOMMENDATIONS_FAILED');
+      console.error('❌ Error in getNearbyRecommendations:', error);
+      // Return empty array instead of throwing to allow fallback in controller
+      return [];
     }
   });
 
