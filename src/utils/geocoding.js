@@ -135,87 +135,47 @@ async function geocodeSalons(salons) {
   
   const geocodedSalons = [];
   for (const salon of salons) {
-    // Add small delay to respect rate limits (1 request per second for OpenStreetMap)
     if (geocodedSalons.length > 0) {
-      await new Promise(resolve => setTimeout(resolve, 1100)); // 1.1 seconds between requests
+      await new Promise(resolve => setTimeout(resolve, 1100));
     }
     const geocoded = await geocodeSalonWithAddress(salon);
     geocodedSalons.push(geocoded);
   }
-  
   return geocodedSalons;
 }
 
-// Legacy functions for backward compatibility (city-based, Netherlands only)
-const cityCoordinates = {
-  'Amsterdam': { lat: 52.3676, lng: 4.9041 },
-  'Rotterdam': { lat: 51.9244, lng: 4.4777 },
-  'Utrecht': { lat: 52.0907, lng: 5.1214 },
-  'The Hague': { lat: 52.0705, lng: 4.3007 },
-  'Eindhoven': { lat: 51.4416, lng: 5.4697 },
-  'Tilburg': { lat: 51.5555, lng: 5.0913 },
-  'Groningen': { lat: 53.2194, lng: 6.5665 },
-  'Almere': { lat: 52.3508, lng: 5.2647 },
-  'Breda': { lat: 51.5719, lng: 4.7683 },
-  'Nijmegen': { lat: 51.8426, lng: 5.8590 },
-  'Apeldoorn': { lat: 52.2112, lng: 5.9699 },
-  'Haarlem': { lat: 52.3874, lng: 4.6462 },
-  'Arnhem': { lat: 51.9851, lng: 5.8987 },
-  'Zaanstad': { lat: 52.4389, lng: 4.8258 },
-  'Amersfoort': { lat: 52.1561, lng: 5.3878 },
-  'Hoofddorp': { lat: 52.3030, lng: 4.6892 },
-  'Maastricht': { lat: 50.8514, lng: 5.6910 },
-  'Leiden': { lat: 52.1601, lng: 4.4970 },
-  'Dordrecht': { lat: 51.8133, lng: 4.6900 },
-  'Zoetermeer': { lat: 52.0575, lng: 4.4932 },
-  'Capelle aan den IJssel': { lat: 51.9292, lng: 4.5778 },
-  'Capelle': { lat: 51.9292, lng: 4.5778 }
-};
-
-function getCityCoordinates(city) {
-  if (!city) return null;
-  
-  if (cityCoordinates[city]) {
-    return cityCoordinates[city];
-  }
-  
-  const cityKey = Object.keys(cityCoordinates).find(
-    key => key.toLowerCase() === city.toLowerCase()
-  );
-  
-  return cityKey ? cityCoordinates[cityKey] : null;
-}
-
-function addRandomOffset(lat, lng) {
-  const latOffset = (Math.random() - 0.5) * 0.09;
-  const lngOffset = (Math.random() - 0.5) * 0.09;
-  
-  return {
-    latitude: parseFloat((lat + latOffset).toFixed(6)),
-    longitude: parseFloat((lng + lngOffset).toFixed(6))
-  };
-}
-
-function geocodeSalon(salon) {
-  const coords = getCityCoordinates(salon.city);
-  
-  if (coords) {
-    const { latitude, longitude } = addRandomOffset(coords.lat, coords.lng);
+/**
+ * Reverse geocode: coordinates → place name / address (OpenStreetMap API).
+ * @param {number} lat - Latitude
+ * @param {number} lon - Longitude
+ * @returns {Promise<Object|null>} - { city, country, formattedAddress, ... } or null
+ */
+async function reverseGeocode(lat, lon) {
+  try {
+    if (lat == null || lon == null || isNaN(Number(lat)) || isNaN(Number(lon))) {
+      return null;
+    }
+    const results = await geocoder.reverse({ lat: Number(lat), lon: Number(lon) });
+    if (!results || results.length === 0) return null;
+    const r = results[0];
     return {
-      ...salon,
-      latitude,
-      longitude
+      city: r.city || r.town || r.village || r.county,
+      country: r.country,
+      countryCode: r.countryCode,
+      formattedAddress: r.formattedAddress,
+      street: r.streetName,
+      zipCode: r.zipcode,
+      state: r.administrativeLevels?.level1long,
     };
+  } catch (err) {
+    console.error('❌ Reverse geocode error:', err?.message ?? err);
+    return null;
   }
-  
-  return salon;
 }
 
 module.exports = {
-  getCityCoordinates,
-  addRandomOffset,
-  geocodeSalon,
-  geocodeSalons, // Now async and works globally
-  geocodeAddress, // Now works globally
-  geocodeSalonWithAddress // Now works globally
+  geocodeAddress,
+  geocodeSalonWithAddress,
+  geocodeSalons,
+  reverseGeocode,
 };

@@ -1,27 +1,36 @@
 # Geocoding (SalonTime Backend)
 
-Salon and address geocoding uses **OpenStreetMap** (via `node-geocoder`). No API key required. Works globally (NL, US, etc.).
+**All geocoding uses the OpenStreetMap API** (via `node-geocoder`). No hardcoded city/location mappings. No API key. Works globally (NL, US, etc.).
+
+## API endpoints
+
+- **Address → coordinates**: Used internally on salon create/update (see `src/utils/geocoding.js`).
+- **Coordinates → place name**:  
+  `GET /api/geocode/reverse?lat=<lat>&lon=<lon>`  
+  Returns `{ city, country, countryCode, formattedAddress, street, zipCode, state }` from OpenStreetMap.
 
 ## Salon coordinates
 
-- `salons.latitude` / `salons.longitude` are set on create/update from address (see `src/utils/geocoding.js`).
+- `salons.latitude` / `salons.longitude` are set on create/update via **geocoding API** (address → coords).
 - Existing rows with `latitude`/`longitude` = `NULL` can be backfilled.
 
 ## Backfill salons without coordinates
 
-Run from project root:
+Run from the **Dotcorr workspace root** (not from `dcf_go` or other subprojects):
 
 ```bash
-cd Agency/salontime-backend
+cd /Users/tahiruagbanwa/Desktop/Dotcorr/Agency/salontime-backend
 node scripts/backfill-salon-coordinates.js
 ```
 
-Optional env:
+Or, if you're already in `Agency/salontime-backend`:
 
-- `BATCH=50` — salons per batch (default 50).
+```bash
+node scripts/backfill-salon-coordinates.js
+```
 
-The script loops until no salons remain without coordinates. Uses full address first, then city+country as fallback.
+Optional env: `BATCH=50` (default). The script loops until no salons lack coordinates. Uses full address first, then city+country as fallback.
 
 ## User location
 
-User location is provided by the client (e.g. device GPS). If you add “use address as location” (e.g. when GPS is off), geocode the address in the app (e.g. `geocoding` package, `locationFromAddress`) and send `latitude`/`longitude` to the API instead of hardcoding.
+User location comes from the client (e.g. device GPS). For "use address as location", geocode the address in the app (e.g. `geocoding` package, `locationFromAddress`) and send `latitude`/`longitude` to the API. Use `GET /api/geocode/reverse?lat=...&lon=...` to resolve coords → place name when needed.

@@ -30,6 +30,7 @@ const reviewRoutes = require('./routes/reviewRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
+const geocodeRoutes = require('./routes/geocode');
 
 // Validate configuration
 config.validate();
@@ -161,6 +162,7 @@ app.use('/api/salon', businessHoursRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/geocode', geocodeRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
