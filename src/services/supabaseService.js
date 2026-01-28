@@ -471,6 +471,29 @@ class SupabaseService {
         throw new AppError('Access token required for user settings', 401, 'MISSING_TOKEN');
       }
       
+      // Check if settings already exist
+      const client = getAuthenticatedClient(accessToken);
+      const { data: existingSettings, error: checkError } = await client
+        .from('user_settings')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+      
+      if (checkError && checkError.code !== 'PGRST116') {
+        console.error('❌ Error checking existing settings:', checkError);
+        throw new AppError(
+          `Failed to check existing user settings: ${checkError.message}`,
+          500,
+          'DATABASE_ERROR'
+        );
+      }
+      
+      // If settings already exist, return them instead of creating new ones
+      if (existingSettings) {
+        console.log('✅ User settings already exist, returning existing settings');
+        return existingSettings;
+      }
+      
     const defaultSettings = {
       user_id: userId,
       language: 'en',
@@ -487,8 +510,6 @@ class SupabaseService {
     };
 
       // Always use authenticated client with user's token for RLS
-      const client = getAuthenticatedClient(accessToken);
-      
       const { data, error } = await client
       .from('user_settings')
       .insert([defaultSettings])
@@ -503,6 +524,22 @@ class SupabaseService {
           details: error.details,
           hint: error.hint
         });
+        
+        // If it's a unique constraint violation, try to fetch existing settings
+        if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+          console.log('⚠️ Settings might already exist, attempting to fetch...');
+          const { data: existing, error: fetchError } = await client
+            .from('user_settings')
+            .select('*')
+            .eq('user_id', userId)
+            .single();
+          
+          if (!fetchError && existing) {
+            console.log('✅ Found existing settings after duplicate error');
+            return existing;
+          }
+        }
+        
         throw new AppError(
           `Failed to create user settings: ${error.message} (code: ${error.code})`,
           500,
