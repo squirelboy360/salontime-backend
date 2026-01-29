@@ -675,7 +675,7 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     return `<output><p><strong>${salon.business_name || 'Salon'}</strong></p><p>${addr}</p>${link}</output>`;
   }
 
-  // When the user asked about their appointments/bookings (today, tomorrow, etc.) but the AI failed.
+  // When the user asked about their appointments/bookings (today, tomorrow, past, etc.) but the AI failed.
   async _bookingsFallback(message, userContext, userId, userToken) {
     const m = message.toLowerCase();
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -684,7 +684,8 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     const isToday = /\btoday\b|vandaag|today\'s|\btonight\b/i.test(m);
     const isTomorrow = /\btomorrow\b|morgen/i.test(m);
     const isYesterday = /\byesterday\b|gisteren/i.test(m);
-    const upcoming = isYesterday ? 'false' : 'true';
+    const isPast = /\b(past|last time|history|previous|when was the last|when did I|my last|bookings?\s*history|past\s*bookings?)\b/i.test(m);
+    const upcoming = (isYesterday || isPast) ? 'false' : 'true';
     // Detect language from message itself (user writes in Dutch = respond in Dutch)
     const messageIsDutch = /\b(vandaag|boekingen|afspraken|geannuleerd|heb|heeft|mijn|voor|de|het|planning)\b/i.test(message);
     const lang = userContext?.language === 'nl' || messageIsDutch;
@@ -707,12 +708,14 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
         list = Array.isArray(raw) ? raw : [];
         if (isTomorrow) list = list.filter(b => (b.appointment_date || b.appointmentDate || '') === tomorrowStr);
         else if (isYesterday) list = list.filter(b => (b.appointment_date || b.appointmentDate || '') === yesterdayStr);
+        // isPast: show all recent past (no date filter)
       }
       
       if (list.length === 0) {
         const msg = isToday ? (lang ? 'Je hebt vandaag geen afspraken.' : 'You have no appointments today.')
           : isTomorrow ? (lang ? 'Je hebt morgen geen afspraken.' : 'You have no appointments tomorrow.')
           : isYesterday ? (lang ? 'Je had gisteren geen afspraken.' : 'You had no appointments yesterday.')
+          : isPast ? (lang ? 'Je hebt geen eerdere afspraken in je geschiedenis.' : 'You have no past appointments in your history.')
           : (lang ? 'Je hebt geen aanstaande afspraken.' : 'You have no upcoming appointments.');
         return `<output><p>${msg}</p></output>`;
       }
@@ -732,7 +735,9 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
         const label = isCancelled ? (lang ? ' (Geannuleerd)' : ' (Cancelled)') : (isUpcoming ? '' : (lang ? ' (Afgelopen)' : ' (Past)'));
         return `<div class="ai-card" ${dataAttrs} style="padding:16px;margin:8px 0;border:1px solid #e0e0e0;border-radius:8px;cursor:pointer;"><h3 style="margin:0 0 8px 0;font-size:16px;font-weight:600;">${salonName}${label}</h3><p style="margin:4px 0;color:#666;font-size:14px;">${serviceName}</p><p style="margin:4px 0;color:#666;font-size:14px;">${date}${sep}${time}</p></div>`;
       }).join('');
-      const head = lang ? `Je hebt ${list.length} afspraak/afspraken:` : `You have ${list.length} appointment(s):`;
+      const head = isPast
+        ? (lang ? `Je had ${list.length} eerdere afspraak/afspraken:` : `You had ${list.length} past appointment(s):`)
+        : (lang ? `Je hebt ${list.length} afspraak/afspraken:` : `You have ${list.length} appointment(s):`);
       return `<output><p style="margin-bottom:16px;font-size:16px;font-weight:600;">${head}</p>${cards}</output>`;
     } catch (e) { return null; }
   }
@@ -1637,12 +1642,13 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
                 console.error('Error in payment status fallback:', e);
               }
             }
-            // If they asked about appointments/bookings (today, yesterday, "what about tomorrow", etc.), fetch and show
+            // If they asked about appointments/bookings (today, yesterday, past, "what about tomorrow", etc.), fetch and show
             // Only if NOT a payment query (payment queries handled above)
-            // Match: appointment, booking, planning, agenda, schedule, afspraak, boeking, "do I have", "heb ik", "staat er", "wat heb ik"
+            // Match: appointment, booking, planning, agenda, schedule, afspraak, boeking, "do I have", "heb ik", "when was the last time", past/history
             const isBookingQuery = !isPaymentQuery && (
               /\b(appointment|booking|bookings|plans|planning|agenda|schedule|afspraak|afspraken|boeking|boekingen)\b/i.test(message) ||
               /\b(do I have|heb ik|staat er|wat heb ik|heb ik.*iets|heb ik.*gepland|staat.*op.*planning|heb ik.*vandaag|heb ik.*morgen|heb ik.*gisteren)\b/i.test(message) ||
+              /\b(when was the last time|last time I did|past booking|my history|booking history)\b/i.test(message) ||
               /\b(any (plans|appointment)|(my|any) (bookings|appointments))\b/i.test(message) ||
               /\b(what about|how about) (yesterday|tomorrow|other days)\b/i.test(message) ||
               /\bother days\b/i.test(message)
@@ -1674,6 +1680,25 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
                 }
               } catch (e) { /* keep generic below */ }
             }
+            // Status-check follow-up: user said "have u got anything?", "any luck?", etc. while last AI message said "one moment"/"fetching"
+            // → treat as "show results for what I asked for" (e.g. past bookings) instead of generic fallback
+            if (!aiResponse && historyMessages && historyMessages.length >= 2) {
+              const lastAssistant = [...historyMessages].reverse().find(m => m.role === 'assistant');
+              const lastContent = (lastAssistant && lastAssistant.content) ? String(lastAssistant.content) : '';
+              const isStatusCheck = /\b(have u got anything|got anything|any luck|did you find|have you got|and\?|well\?|anything\?|any result|got it\?|any update|you got something)\b/i.test(message.trim());
+              const lastSaidFetching = /\b(one moment|get that from the API|checking|I need to fetch|let me get|I'll check|fetching|I need to get that)\b/i.test(lastContent);
+              if (isStatusCheck && lastSaidFetching) {
+                try {
+                  const html = await this._bookingsFallback('past bookings', userContext, userId, userToken);
+                  if (html) {
+                    aiResponse = html;
+                    console.log('🔄 Status-check follow-up: forced past bookings fallback (user asked for results after "one moment")');
+                  }
+                } catch (e) {
+                  console.error('Error in status-check past-bookings fallback:', e);
+                }
+              }
+            }
             if (!aiResponse || !String(aiResponse).trim()) {
               aiResponse = userContext.language === 'nl'
                 ? 'Ik begrijp het niet helemaal. Vertel in je eigen woorden wat je zoekt—bijvoorbeeld je afspraken bekijken, een salon zoeken, of iets boeken?'
@@ -1697,6 +1722,20 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
             ? 'Ik begrijp het niet helemaal. Kun je in je eigen woorden vertellen wat je nodig hebt?'
             : "I didn't quite get that. Could you tell me in your own words what you're looking for?";
           console.log('🔄 Replaced forbidden "verwerkt" response with follow-up (user said:', message.substring(0, 50), ')');
+        }
+      }
+      // If the model said "one moment" / "I need to get that from the API" for past/last-time bookings, replace with actual past bookings
+      const saidFetchingBookings = aiResponse && /\b(one moment|get that from the API|I need to fetch|I'll check|checking.*booking|past booking)\b/i.test(aiResponse);
+      const askedPastOrLastTime = /\b(when was the last time|last time I did|past booking|my history|past appointments)\b/i.test(message);
+      if (saidFetchingBookings && askedPastOrLastTime) {
+        try {
+          const html = await this._bookingsFallback('past bookings', userContext, userId, userToken);
+          if (html) {
+            aiResponse = html;
+            console.log('🔄 Replaced "one moment" response with actual past bookings');
+          }
+        } catch (e) {
+          console.error('Error replacing "one moment" with past bookings:', e);
         }
       }
       // If the model said "I'm still working" or "I'm fetching" for sales, replace with actual data
