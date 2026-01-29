@@ -505,12 +505,9 @@ class SalonController {
         console.log('🔍 Escaped query:', escapedQuery);
         console.log('🔍 Search pattern:', searchPattern);
         
-        // Use Supabase's or() to search across multiple fields
-        // Format: field.ilike.value,field2.ilike.value2
-        // PostgREST expects the pattern without URL encoding for ilike
-        // The pattern is passed directly to PostgREST which handles it
-        // Note: PostgREST may need the pattern to be properly formatted
-        query = query.or(`business_name.ilike.${searchPattern},description.ilike.${searchPattern},city.ilike.${searchPattern}`);
+        // Use Supabase's or() to search across multiple fields: name, description, city, address
+        // So users can search by salon name (e.g. "echt"), city, or location text
+        query = query.or(`business_name.ilike.${searchPattern},description.ilike.${searchPattern},city.ilike.${searchPattern},address.ilike.${searchPattern}`);
         
         console.log('🔍 Applied search filter with pattern:', searchPattern);
       }
@@ -566,12 +563,13 @@ class SalonController {
       }
 
       // Service filtering - fetch matching salon IDs first, then filter main query
-      // This is more efficient than fetching all salons then filtering
+      // Only use explicit services/service params here. Do NOT use searchQuery as service filter
+      // (searchQuery is for name/city/description text search above) so e.g. "echt" finds salons
+      // with "echt" in business_name instead of requiring a service named "echt"
       let serviceFilteredSalonIds = null;
-      if (services || service || (searchQuery && !searchQuery.includes(' '))) {
+      if (services || service) {
         const serviceList = services ? services.split(',') : (service ? [service] : []);
-        const searchAsService = searchQuery && !services && !service ? [searchQuery] : [];
-        const allServiceFilters = [...serviceList, ...searchAsService];
+        const allServiceFilters = [...serviceList];
 
         if (allServiceFilters.length > 0) {
           // First, try to find matching category IDs from service_categories table
