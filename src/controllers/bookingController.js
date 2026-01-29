@@ -1278,20 +1278,40 @@ class BookingController {
         throw new AppError('Failed to check payment', 500, 'PAYMENT_CHECK_FAILED');
       }
 
-      // Get service price for amount (services is an array from the join)
-      const servicePrice = (Array.isArray(booking.services) && booking.services.length > 0) 
-        ? booking.services[0].price 
-        : 0;
-      const amount = existingPayment?.amount || servicePrice || 0;
-      
-      console.log(`💵 Payment amount: ${amount} (from existing: ${existingPayment?.amount}, service: ${servicePrice})`);
+      // Resolve amount: use existing payment amount when updating; when creating, fetch from services by service_id
+      let amount;
+      if (existingPayment) {
+        amount = parseFloat(existingPayment.amount) || 0;
+      } else {
+        let servicePrice = 0;
+        if (booking.service_id) {
+          const { data: svc, error: svcErr } = await supabaseAdmin
+            .from('services')
+            .select('price')
+            .eq('id', booking.service_id)
+            .maybeSingle();
+          if (!svcErr && svc?.price != null) servicePrice = parseFloat(svc.price) || 0;
+          if (servicePrice === 0 && booking.services) {
+            const p = Array.isArray(booking.services) && booking.services[0]
+              ? booking.services[0].price
+              : booking.services?.price;
+            if (p != null) servicePrice = parseFloat(p) || 0;
+          }
+        }
+        amount = servicePrice;
+      }
+
+      const amountFinal = Math.max(0, Number(amount) || 0);
+      console.log(`💵 Payment amount: ${amountFinal} (existing: ${existingPayment?.amount}, service_id: ${booking.service_id})`);
+
+      // Use 'succeeded' (Stripe-style); DB may disallow 'completed' via payments_status_check. UI treats both as paid.
+      const paidStatus = 'succeeded';
 
       if (existingPayment) {
-        // Update existing payment
         const { error: updateError } = await supabaseAdmin
           .from('payments')
           .update({
-            status: 'completed',
+            status: paidStatus,
             payment_method: 'cash',
             updated_at: new Date().toISOString()
           })
@@ -1302,14 +1322,13 @@ class BookingController {
           throw new AppError('Failed to update payment', 500, 'PAYMENT_UPDATE_FAILED');
         }
       } else {
-        // Create new payment record
         const { error: createError } = await supabaseAdmin
           .from('payments')
           .insert({
             booking_id: bookingId,
-            amount: amount,
+            amount: amountFinal,
             currency: 'EUR',
-            status: 'completed',
+            status: paidStatus,
             payment_method: 'cash',
           });
 
