@@ -42,6 +42,10 @@ class AIController {
       contextInfo.push(`Favorite salons: ${userContext.favoriteSalons.length} salon(s)`);
     }
 
+    if (userContext.mySalonId) {
+      contextInfo.push(`User is a salon owner. Their salon ID: ${userContext.mySalonId}. For "where is it" or "where is my salon" or "waar is het" or "waar is mijn salon" when they do not name a salon, call GET /api/salons/my/salon to get their salon and return the address—do NOT ask "which salon?".`);
+    }
+
     return `You are a friendly, natural AI assistant for SalonTime—a salon booking app. Talk like a helpful friend, not a robot or menu system. Be conversational, warm, and human-like.
 
 **CORE PRINCIPLE**: Always answer questions directly and naturally FIRST, then provide supporting details. Never just dump data without context. If you need information, fetch it and explain what you found in a natural, conversational way.
@@ -68,7 +72,8 @@ HOW TO BE NATURAL AND CONVERSATIONAL:
 - **Always return salon results as HTML <output> with ai-card and data-salon-id** so the user can tap to open and book. Do not reply with only "How can I help you?" or a generic—call the API and show cards.
 
 **ONE SPECIFIC THING ABOUT ONE ITEM** – When the user asks for **anything about one salon or booking** you just showed (e.g. picture, address, hours, "open in maps", "their services", "show me their services", "what do they offer", "location", "where is it", "locatie", "waar is het"):
-- **Resolve which one**: 
+- **Salon owners – "where is it" / "waar is het"**: If User Context says the user is a salon owner and they ask "where is it", "waar is het", "where is my salon", "waar is mijn salon" without naming a salon, they mean THEIR salon. Call GET /api/salons/my/salon to get their salon, then return the address and a Google Maps link. Do NOT ask "which salon?" or "provide the salon name".
+- **Resolve which one** (when not a salon owner or when they referred to a list): 
   * If they say "the first one", "de eerste", "the second", "that one", "die", "deze" - they're referring to an item from the list you just showed. Extract the salon_id or booking_id from the FIRST item in your last response (or the specific position they mentioned).
   * For bookings: Each booking has a salon_id. Use that to fetch salon details.
   * For salons: Use data-salon-id from the card you showed, or /api/salons/search?q=name.
@@ -421,6 +426,34 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     }
   }
 
+  // When a salon owner asks "where is it" / "waar is het" / "where is my salon" — get their salon from DB and return address (no need to ask "which salon?").
+  async _mySalonLocationFallback(message, userContext, userId, userToken) {
+    if (!userContext?.mySalonId) return null;
+    const isLocationAsk = /\b(where is it|waar is het|where is my salon|waar is mijn salon|location of my salon|address of my salon|locatie van mijn salon|adres van mijn salon)\b/i.test(message.trim());
+    if (!isLocationAsk) return null;
+
+    try {
+      const salonRes = await this.makeApiRequest(userId, userToken, 'GET', '/api/salons/my/salon', null, {});
+      const salon = salonRes?.data?.data?.salon || salonRes?.data?.salon;
+      if (!salon) return null;
+
+      const lang = userContext?.language === 'nl';
+      const addr = [salon.address, salon.city, salon.zip_code].filter(Boolean).join(', ') || (lang ? 'Adres niet beschikbaar' : 'Address not available');
+      const lat = salon.latitude;
+      const lng = salon.longitude;
+      const mapsUrl = (lat != null && lng != null)
+        ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
+        : (salon.address || salon.city ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(salon.address || salon.city || '')}` : null);
+      const link = mapsUrl ? `<a href="${mapsUrl}">${lang ? 'Open in Google Maps' : 'Open in Google Maps'}</a>` : '';
+      const salonName = salon.business_name || (lang ? 'Je salon' : 'Your salon');
+
+      return `<output><p><strong>${salonName}</strong></p><p>${addr}</p>${link}</output>`;
+    } catch (e) {
+      console.error('Error in my salon location fallback:', e);
+      return null;
+    }
+  }
+
   // When the user asked about payment status for a booking but the AI failed:
   // extract booking_id from history, fetch payment status, return Yes/No answer
   async _paymentStatusFallback(historyMessages, message, userContext, userId, userToken, allFunctionResponses = []) {
@@ -749,10 +782,11 @@ ${userContext.language === 'nl' ? 'Respond in Dutch (Nederlands).' : 'Respond in
     const messageIsDutch = /\b(analyseer|vandaag|boekingen|omzet|winst|verdiend|heb|heeft|mijn|voor|salon eigenaar)\b/i.test(message);
     const lang = userContext?.language === 'nl' || messageIsDutch;
     const m = message.toLowerCase();
-    const isSales = /\b(sales|revenue|analytics|analyze|analyse|omzet|winst|how much.*make|how much.*earn|verdiend|earned|earnings)\b/i.test(m);
+    const isSales = /\b(sales|revenue|analytics|analyze|analyse|omzet|winst|how much.*make|how much.*earn|verdiend|earned|earnings|gekregen)\b/i.test(m) ||
+      /mijn salon|hoeveel.*(mijn )?salon|salon.*(vandag|gekregen|omzet|earned)/i.test(m);
     if (!isSales) return null;
 
-    const isToday = /\btoday\b|vandaag/i.test(m);
+    const isToday = /\btoday\b|vandaag|vandag/i.test(m);
     const todayStr = new Date().toISOString().slice(0, 10);
     
     try {
@@ -995,20 +1029,32 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
         .eq('user_id', userId)
         .limit(10);
 
+      // If user owns a salon (salon owner), get their salon id for "where is my salon" / "where is it" flows
+      const { data: mySalon } = await client
+        .from('salons')
+        .select('id')
+        .eq('owner_id', userId)
+        .limit(1)
+        .maybeSingle();
+
       return {
         userId: userId,
         name: userProfile ? `${userProfile.first_name} ${userProfile.last_name}` : null,
         language: userProfile?.language || 'en',
         recentBookings: recentBookings || [],
         favoriteSalons: favoriteSalons?.map(f => f.salons) || [],
-        location: (latitude && longitude) ? { latitude, longitude } : null
+        location: (latitude && longitude) ? { latitude, longitude } : null,
+        mySalonId: mySalon?.id || null,
+        user_type: mySalon ? 'salon_owner' : 'client'
       };
     } catch (error) {
       return {
         name: null,
         language: 'en',
         recentBookings: [],
-        favoriteSalons: []
+        favoriteSalons: [],
+        mySalonId: null,
+        user_type: 'client'
       };
     }
   }
@@ -1598,7 +1644,8 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
             }
           } else if (!aiResponse || !String(aiResponse).trim()) {
             // If they asked about sales/analytics (check this first, before any other fallbacks)
-            const isSalesQuery = /\b(sales|revenue|analytics|analyze|analyse|omzet|winst|how much.*make|how much.*earn|verdiend|earned|earnings)\b/i.test(message);
+            const isSalesQuery = /\b(sales|revenue|analytics|analyze|analyse|omzet|winst|how much.*make|how much.*earn|verdiend|earned|earnings|gekregen)\b/i.test(message) ||
+              /mijn salon|hoeveel.*(mijn )?salon|salon.*(vandag|gekregen|omzet|earned)/i.test(message);
             if (isSalesQuery) {
               try {
                 const salesHtml = await this._salesAnalyticsFallback(message, userContext, userId, userToken);
@@ -1612,8 +1659,15 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
             // If they asked for one thing about one salon (picture, location, maps, services), try that first
             if (!aiResponse && /\b(picture|image|photo|location|address|maps|map|navigate|services)\b|where is the picture|show me in maps|in a map|their services|what services|show me their services|what do they offer/i.test(message)) {
               try {
-                const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
-                if (html) aiResponse = html;
+                // Salon owner asking "where is it" / "waar is het" without naming a salon → use their salon from DB
+                if (userContext?.mySalonId && /\b(where is it|waar is het|where is my salon|waar is mijn salon)\b/i.test(message.trim())) {
+                  const mySalonHtml = await this._mySalonLocationFallback(message, userContext, userId, userToken);
+                  if (mySalonHtml) aiResponse = mySalonHtml;
+                }
+                if (!aiResponse) {
+                  const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
+                  if (html) aiResponse = html;
+                }
               } catch (e) {}
             }
             // If they asked about payment status (check this BEFORE bookings to handle combined queries)
@@ -1738,10 +1792,12 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
           console.error('Error replacing "one moment" with bookings:', e);
         }
       }
-      // If the model said it would fetch sales/earnings ("Let me check if you made any sales", "I'll need to retrieve your bookings and payment history") but didn't return data, do it now (same-turn fix).
+      // If the model said it would fetch sales/earnings ("Let me check...", "your salon has earned", etc.) but didn't return data, do it now (same-turn fix).
       const saidFetchingSales = aiResponse && !/<output>|€\d|EUR|euro|revenue|verdiend|omzet/.test(aiResponse) &&
-        /(Let me check if you made any sales|I'll need to retrieve your bookings and payment history|retrieve your bookings and payment history|calculate your earnings|calculate your revenue|check.*sales|fetch.*sales)/i.test(aiResponse);
-      if (saidFetchingSales && /\b(sales|revenue|earnings|make today|earn|verdiend|omzet|winst)\b/i.test(message)) {
+        /(Let me check if you made any sales|Let me check how much your salon|your salon has earned|salon has earned today|I'll need to retrieve your bookings and payment history|retrieve your bookings and payment history|calculate your earnings|calculate your revenue|check.*sales|fetch.*sales|hoeveel mijn salon|mijn salon heeft)/i.test(aiResponse);
+      const messageIsAboutSales = /\b(sales|revenue|earnings|make today|earn|verdiend|omzet|winst)\b/i.test(message) ||
+        /mijn salon|gekregen|hoeveel.*salon|salon.*vandag|salon.*(gekregen|earned|omzet)/i.test(message);
+      if (saidFetchingSales && messageIsAboutSales) {
         try {
           const salesHtml = await this._salesAnalyticsFallback(message, userContext, userId, userToken);
           if (salesHtml) {
@@ -1785,7 +1841,7 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
         }
         // User said "Okay" / "Yes" / "Ja" etc. after assistant said they would fetch sales/earnings → run sales fallback with previous user message
         const isShortConfirmation = /^(okay|ok|yes|sure|go ahead|ja|prima|do it|yes please|doe maar|ga door|graag)\s*!?\.?$/i.test(msgTrim) || msgTrim === 'ok' || msgTrim === 'yes' || msgTrim === 'ja';
-        const lastSaidFetchingSales = /(retrieve your bookings and payment history|calculate your earnings|Let me check if you made any sales|I'll need to retrieve|payment history to calculate|check.*sales.*today|fetch.*(sales|revenue|earnings))/i.test(lastContent);
+        const lastSaidFetchingSales = /(retrieve your bookings and payment history|calculate your earnings|Let me check if you made any sales|Let me check how much your salon|your salon has earned|I'll need to retrieve|payment history to calculate|check.*sales.*today|fetch.*(sales|revenue|earnings)|hoeveel mijn salon)/i.test(lastContent);
         if (isShortConfirmation && lastSaidFetchingSales) {
           const userMessages = historyMessages.filter(m => m.role === 'user');
           const previousUserContent = userMessages.length >= 2 ? (userMessages[userMessages.length - 2].content || '').trim() : message;
@@ -1822,6 +1878,19 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
           }
         } catch (e) {
           console.error('Error in sales analytics fallback:', e);
+        }
+      }
+      // If salon owner asked "where is it" / "waar is het" but AI said "which salon?" / "provide the salon name" — get their salon from DB and return address
+      if (userContext?.mySalonId && /\b(where is it|waar is het|where is my salon|waar is mijn salon)\b/i.test(message.trim()) &&
+          aiResponse && /which salon|provide the salon name|salon name or ID|which salon are you/i.test(aiResponse)) {
+        try {
+          const mySalonHtml = await this._mySalonLocationFallback(message, userContext, userId, userToken);
+          if (mySalonHtml) {
+            aiResponse = mySalonHtml;
+            console.log('🔄 Replaced "which salon?" with my-salon address (salon owner)');
+          }
+        } catch (e) {
+          console.error('Error replacing which-salon with my-salon location:', e);
         }
       }
       // If user asked about sales/revenue but AI responded with just bookings (no revenue amount), replace with sales calculation
