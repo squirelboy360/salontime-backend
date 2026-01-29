@@ -1738,6 +1738,20 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
           console.error('Error replacing "one moment" with bookings:', e);
         }
       }
+      // If the model said it would fetch sales/earnings ("Let me check if you made any sales", "I'll need to retrieve your bookings and payment history") but didn't return data, do it now (same-turn fix).
+      const saidFetchingSales = aiResponse && !/<output>|€\d|EUR|euro|revenue|verdiend|omzet/.test(aiResponse) &&
+        /(Let me check if you made any sales|I'll need to retrieve your bookings and payment history|retrieve your bookings and payment history|calculate your earnings|calculate your revenue|check.*sales|fetch.*sales)/i.test(aiResponse);
+      if (saidFetchingSales && /\b(sales|revenue|earnings|make today|earn|verdiend|omzet|winst)\b/i.test(message)) {
+        try {
+          const salesHtml = await this._salesAnalyticsFallback(message, userContext, userId, userToken);
+          if (salesHtml) {
+            aiResponse = salesHtml;
+            console.log('🔄 Replaced "I\'ll fetch sales" response with actual sales data (same turn)');
+          }
+        } catch (e) {
+          console.error('Error replacing "I\'ll fetch sales" with actual data:', e);
+        }
+      }
       // If the model said "Let me get that for you" or "I should be checking your past" with no actual data, replace with past bookings
       if (aiResponse && /(Let me get that for you|I should be checking your past)/i.test(aiResponse) && !/<output>|data-booking-id/.test(aiResponse)) {
         try {
@@ -1755,7 +1769,8 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
       if (isGenericFallback && historyMessages && historyMessages.length >= 2) {
         const lastAssistant = [...historyMessages].reverse().find(m => m.role === 'assistant');
         const lastContent = (lastAssistant && lastAssistant.content) ? String(lastAssistant.content) : '';
-        const isStatusCheck = /\b(have u got anything|got anything|any luck|did you find|have you got|anything\?|got it\?|any update|have u forgot the context|did you forget|remember what I asked)\b/i.test(message.trim());
+        const msgTrim = message.trim().toLowerCase();
+        const isStatusCheck = /\b(have u got anything|got anything|any luck|did you find|have you got|anything\?|got it\?|any update|have u forgot the context|did you forget|remember what I asked)\b/i.test(msgTrim);
         const lastSaidFetching = /(one moment|get that from the API|I need to get that information|checking|let me get|I'll check|fetching|I should be checking your past)/i.test(lastContent);
         if (isStatusCheck && lastSaidFetching) {
           try {
@@ -1766,6 +1781,22 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
             }
           } catch (e) {
             console.error('Error replacing generic with past bookings:', e);
+          }
+        }
+        // User said "Okay" / "Yes" / "Ja" etc. after assistant said they would fetch sales/earnings → run sales fallback with previous user message
+        const isShortConfirmation = /^(okay|ok|yes|sure|go ahead|ja|prima|do it|yes please|doe maar|ga door|graag)\s*!?\.?$/i.test(msgTrim) || msgTrim === 'ok' || msgTrim === 'yes' || msgTrim === 'ja';
+        const lastSaidFetchingSales = /(retrieve your bookings and payment history|calculate your earnings|Let me check if you made any sales|I'll need to retrieve|payment history to calculate|check.*sales.*today|fetch.*(sales|revenue|earnings))/i.test(lastContent);
+        if (isShortConfirmation && lastSaidFetchingSales) {
+          const userMessages = historyMessages.filter(m => m.role === 'user');
+          const previousUserContent = userMessages.length >= 2 ? (userMessages[userMessages.length - 2].content || '').trim() : message;
+          try {
+            const salesHtml = await this._salesAnalyticsFallback(previousUserContent, userContext, userId, userToken);
+            if (salesHtml) {
+              aiResponse = salesHtml;
+              console.log('🔄 Replaced generic fallback with sales data (user said "Okay" after "I\'ll fetch sales")');
+            }
+          } catch (e) {
+            console.error('Error replacing generic with sales after confirmation:', e);
           }
         }
       }
