@@ -90,6 +90,10 @@ app.use(compression());
 // Logging middleware
 app.use(logger);
 
+// Favicon (avoid 404 logs from Vercel/browsers)
+app.get('/favicon.ico', (req, res) => { res.status(204).end(); });
+app.get('/favicon.png', (req, res) => { res.status(204).end(); });
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
