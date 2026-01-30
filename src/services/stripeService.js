@@ -94,6 +94,24 @@ class StripeService {
     }
   }
 
+  /**
+   * Create Express Dashboard login link for a Connect account.
+   * Used by "Open Stripe settings" / Payment settings to open Stripe Express dashboard (payouts, bank, etc.).
+   */
+  async createDashboardLink(accountId) {
+    this._checkStripeEnabled();
+    try {
+      const loginLink = await this.stripe.accounts.createLoginLink(accountId);
+      return {
+        url: loginLink.url,
+        expires_at: loginLink.created ? loginLink.created + 3600 : null, // typical ~1h validity
+      };
+    } catch (error) {
+      console.error('Stripe createLoginLink error:', error.message);
+      throw new AppError(`Failed to create dashboard link: ${error.message}`, 500, 'DASHBOARD_LINK_FAILED');
+    }
+  }
+
   // Handle Stripe webhooks
   async handleWebhook(req, res) {
     const sig = req.headers['stripe-signature'];
