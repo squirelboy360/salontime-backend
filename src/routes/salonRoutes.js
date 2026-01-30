@@ -25,7 +25,13 @@ router.get('/recommendations/personalized', salonController.getPersonalizedRecom
 router.post('/', salonController.createSalon);
 router.get('/my/salon', salonController.getMySalon);
 router.put('/my/salon', salonController.updateSalon);
+router.get('/my/join-code', salonController.getJoinCode);
+router.get('/my/employees', salonController.getMyEmployees);
 router.get('/clients', salonController.getSalonClients);
+
+// Employee join/leave (any authenticated user)
+router.post('/join', salonController.joinSalonByCode);
+router.delete('/leave/:salonId', salonController.leaveSalon);
 
 // Stripe Connect routes
 router.post('/stripe/account', salonController.createStripeAccount);

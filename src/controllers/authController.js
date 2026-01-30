@@ -135,9 +135,11 @@ class AuthController {
         }
       }
 
-      // One account: include has_salon. Use requested user_type (OAuth allows both views).
+      // One account: include has_salon and staff_salon_ids. Use requested user_type (OAuth allows both views).
       const { data: owned } = await supabaseAdmin.from('salons').select('id').eq('owner_id', user.id).limit(1);
       const has_salon = !!(owned && owned.length > 0);
+      const { data: staffRows } = await supabaseAdmin.from('staff').select('salon_id').eq('user_id', user.id).eq('is_active', true);
+      const staff_salon_ids = (staffRows || []).map(r => r.salon_id);
 
       // Return user data and tokens
       res.status(200).json({
@@ -148,6 +150,7 @@ class AuthController {
             email: user.email,
             user_type: user_type,
             has_salon: has_salon,
+            staff_salon_ids: staff_salon_ids,
             first_name: userProfile.first_name,
             last_name: userProfile.last_name,
             avatar_url: userProfile.avatar_url,
@@ -213,6 +216,8 @@ class AuthController {
       const userProfile = await supabaseService.getUserProfile(req.user.id);
       const { data: owned } = await supabaseAdmin.from('salons').select('id').eq('owner_id', req.user.id).limit(1);
       const has_salon = !!(owned && owned.length > 0);
+      const { data: staffRows } = await supabaseAdmin.from('staff').select('salon_id').eq('user_id', req.user.id).eq('is_active', true);
+      const staff_salon_ids = (staffRows || []).map(r => r.salon_id);
 
       res.status(200).json({
         success: true,
@@ -222,6 +227,7 @@ class AuthController {
             email: req.user.email,
             user_type: userProfile.user_type,
             has_salon: has_salon,
+            staff_salon_ids: staff_salon_ids,
             first_name: userProfile.first_name,
             last_name: userProfile.last_name,
             phone: userProfile.phone,

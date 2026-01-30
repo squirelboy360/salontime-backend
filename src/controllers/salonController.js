@@ -1,8 +1,13 @@
+const crypto = require('crypto');
 const { supabase, supabaseAdmin } = require('../config/database');
 const stripeService = require('../services/stripeService');
 const supabaseService = require('../services/supabaseService');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const config = require('../config');
+
+function generateJoinCode() {
+  return crypto.randomBytes(4).toString('hex').toUpperCase();
+}
 
 class SalonController {
   // Create salon profile
@@ -1799,6 +1804,158 @@ class SalonController {
         message: 'Favorite tracking failed but continuing'
       });
     }
+  });
+
+  // Get or create join code for owner's salon (for inviting employees)
+  getJoinCode = asyncHandler(async (req, res) => {
+    const { data: salon, error: fetchError } = await supabaseAdmin
+      .from('salons')
+      .select('id, join_code')
+      .eq('owner_id', req.user.id)
+      .single();
+
+    if (fetchError || !salon) {
+      throw new AppError('No salon found for this user', 404, 'SALON_NOT_FOUND');
+    }
+
+    let joinCode = salon.join_code;
+    if (!joinCode) {
+      let attempts = 0;
+      while (attempts < 5) {
+        joinCode = generateJoinCode();
+        const { error: updateError } = await supabaseAdmin
+          .from('salons')
+          .update({ join_code: joinCode })
+          .eq('id', salon.id);
+        if (!updateError) break;
+        if (updateError.code === '23505') { /* unique violation, retry */ attempts++; continue; }
+        throw new AppError('Failed to generate join code', 500, 'JOIN_CODE_FAILED');
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: { join_code: joinCode, salon_id: salon.id }
+    });
+  });
+
+  // Join a salon as employee using join code
+  joinSalonByCode = asyncHandler(async (req, res) => {
+    const { code } = req.body;
+    const normalizedCode = typeof code === 'string' ? code.trim().toUpperCase() : '';
+
+    if (!normalizedCode) {
+      throw new AppError('Join code is required', 400, 'MISSING_JOIN_CODE');
+    }
+
+    const { data: salon, error: salonError } = await supabaseAdmin
+      .from('salons')
+      .select('id, owner_id, business_name')
+      .eq('join_code', normalizedCode)
+      .single();
+
+    if (salonError || !salon) {
+      throw new AppError('Invalid join code', 404, 'INVALID_JOIN_CODE');
+    }
+
+    if (salon.owner_id === req.user.id) {
+      throw new AppError('You cannot join your own salon as employee', 400, 'OWNER_CANNOT_JOIN');
+    }
+
+    const { data: existingStaff } = await supabaseAdmin
+      .from('staff')
+      .select('id')
+      .eq('salon_id', salon.id)
+      .eq('user_id', req.user.id)
+      .maybeSingle();
+
+    if (existingStaff) {
+      return res.status(200).json({
+        success: true,
+        data: { salon_id: salon.id, business_name: salon.business_name, already_member: true }
+      });
+    }
+
+    const userProfile = await supabaseService.getUserProfile(req.user.id).catch(() => null);
+    const displayName = userProfile ? [userProfile.first_name, userProfile.last_name].filter(Boolean).join(' ') : req.user.email?.split('@')[0] || 'Employee';
+
+    const { data: staff, error: insertError } = await supabaseAdmin
+      .from('staff')
+      .insert({
+        salon_id: salon.id,
+        user_id: req.user.id,
+        name: displayName,
+        email: req.user.email || null,
+        is_active: true
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.error('Staff insert error:', insertError);
+      throw new AppError('Failed to join salon', 500, 'JOIN_SALON_FAILED');
+    }
+
+    res.status(200).json({
+      success: true,
+      data: { salon_id: salon.id, business_name: salon.business_name, staff_id: staff.id }
+    });
+  });
+
+  // Leave a salon (remove staff link for current user)
+  leaveSalon = asyncHandler(async (req, res) => {
+    const { salonId } = req.params;
+
+    const { data: staff, error: fetchError } = await supabaseAdmin
+      .from('staff')
+      .select('id')
+      .eq('salon_id', salonId)
+      .eq('user_id', req.user.id)
+      .maybeSingle();
+
+    if (fetchError || !staff) {
+      throw new AppError('You are not a member of this salon', 404, 'NOT_STAFF');
+    }
+
+    const { error: deleteError } = await supabaseAdmin
+      .from('staff')
+      .delete()
+      .eq('id', staff.id);
+
+    if (deleteError) {
+      throw new AppError('Failed to leave salon', 500, 'LEAVE_SALON_FAILED');
+    }
+
+    res.status(200).json({ success: true, message: 'Left salon successfully' });
+  });
+
+  // List employees (staff with user_id set) for owner's salon
+  getMyEmployees = asyncHandler(async (req, res) => {
+    const { data: salon } = await supabaseAdmin
+      .from('salons')
+      .select('id')
+      .eq('owner_id', req.user.id)
+      .single();
+
+    if (!salon) {
+      throw new AppError('No salon found for this user', 404, 'SALON_NOT_FOUND');
+    }
+
+    const { data: staffList, error } = await supabaseAdmin
+      .from('staff')
+      .select('id, name, email, phone, is_active, user_id, created_at')
+      .eq('salon_id', salon.id)
+      .not('user_id', 'is', null)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new AppError('Failed to fetch employees', 500, 'EMPLOYEES_FETCH_FAILED');
+    }
+
+    res.status(200).json({
+      success: true,
+      data: { employees: staffList || [] }
+    });
   });
 }
 
