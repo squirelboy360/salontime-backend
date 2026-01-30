@@ -1591,8 +1591,8 @@ Other: /api/bookings (upcoming, limit), /api/salons/nearby, /api/salons/search, 
                   if (mySalonHtml) aiResponse = mySalonHtml;
                 }
                 if (!aiResponse) {
-                  const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
-                  if (html) aiResponse = html;
+                const html = await this._oneSalonDetailFallback(historyMessages, message, userContext, userId, userToken);
+                if (html) aiResponse = html;
                 }
               } catch (e) {}
             }

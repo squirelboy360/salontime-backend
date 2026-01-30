@@ -1174,7 +1174,8 @@ class SalonController {
     }
   });
 
-  // Get Stripe dashboard link (or onboarding link if account not yet active)
+  // Get Stripe dashboard link (or onboarding link only if account really not ready)
+  // Uses Stripe as source of truth so we don't send users to onboarding when they're already done.
   getStripeDashboardLink = asyncHandler(async (req, res) => {
     try {
       const { data: salon, error: salonError } = await supabaseAdmin
@@ -1195,7 +1196,25 @@ class SalonController {
         throw new AppError('Stripe account not found for this salon', 404, 'STRIPE_ACCOUNT_NOT_FOUND');
       }
 
-      if (salon.stripe_account_status === 'active') {
+      // Prefer Stripe as source of truth: if onboarding is done, always return dashboard (login) link
+      let useDashboardLink = salon.stripe_account_status === 'active';
+      try {
+        const accountStatus = await stripeService.getAccountStatus(salon.stripe_account_id);
+        if (accountStatus.details_submitted || (accountStatus.charges_enabled && accountStatus.payouts_enabled)) {
+          useDashboardLink = true;
+          // Optionally sync our DB if we had stale 'pending'
+          if (salon.stripe_account_status !== 'active') {
+            await supabaseAdmin.from('salons').update({
+              stripe_account_status: 'active',
+              updated_at: new Date().toISOString()
+            }).eq('id', salon.id);
+          }
+        }
+      } catch (statusErr) {
+        // If we can't fetch status, fall back to DB: use dashboard only when DB says active
+      }
+
+      if (useDashboardLink) {
         const dashboardLink = await stripeService.createDashboardLink(salon.stripe_account_id);
         return res.status(200).json({
           success: true,
@@ -1207,7 +1226,7 @@ class SalonController {
         });
       }
 
-      // Account not active: return onboarding link so owner can complete verification
+      // Account not ready in Stripe: return onboarding link so owner can complete verification
       const frontendUrl = process.env.FRONTEND_URL || 'https://www.salontime.nl';
       const returnUrl = frontendUrl.startsWith('http')
         ? `${frontendUrl}/salon/onboarding/success`
