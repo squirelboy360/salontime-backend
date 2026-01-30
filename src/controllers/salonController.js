@@ -1174,10 +1174,9 @@ class SalonController {
     }
   });
 
-  // Get Stripe dashboard link
+  // Get Stripe dashboard link (or onboarding link if account not yet active)
   getStripeDashboardLink = asyncHandler(async (req, res) => {
     try {
-      // Get user's salon
       const { data: salon, error: salonError } = await supabaseAdmin
         .from('salons')
         .select('*')
@@ -1196,22 +1195,45 @@ class SalonController {
         throw new AppError('Stripe account not found for this salon', 404, 'STRIPE_ACCOUNT_NOT_FOUND');
       }
 
-      // Check if account is fully onboarded
-      if (salon.stripe_account_status !== 'active') {
-        throw new AppError('Stripe account not fully onboarded', 400, 'ACCOUNT_NOT_READY');
+      if (salon.stripe_account_status === 'active') {
+        const dashboardLink = await stripeService.createDashboardLink(salon.stripe_account_id);
+        return res.status(200).json({
+          success: true,
+          data: {
+            dashboard_url: dashboardLink.url,
+            onboarding_url: null,
+            expires_at: dashboardLink.expires_at
+          }
+        });
       }
 
-      // Generate dashboard link using Stripe's createLoginLink
-      const dashboardLink = await stripeService.createDashboardLink(salon.stripe_account_id);
+      // Account not active: return onboarding link so owner can complete verification
+      const frontendUrl = process.env.FRONTEND_URL || 'https://www.salontime.nl';
+      const returnUrl = frontendUrl.startsWith('http')
+        ? `${frontendUrl}/salon/onboarding/success`
+        : `https://${frontendUrl}/salon/onboarding/success`;
+      const refreshUrl = frontendUrl.startsWith('http')
+        ? `${frontendUrl}/salon/onboarding/retry`
+        : `https://${frontendUrl}/salon/onboarding/retry`;
+
+      if (!returnUrl.match(/^https?:\/\//) || !refreshUrl.match(/^https?:\/\//)) {
+        throw new AppError('Invalid FRONTEND_URL for onboarding link', 500, 'DASHBOARD_LINK_FAILED');
+      }
+
+      const accountLink = await stripeService.createAccountLink(
+        salon.stripe_account_id,
+        returnUrl,
+        refreshUrl
+      );
 
       res.status(200).json({
         success: true,
         data: {
-          dashboard_url: dashboardLink.url,
-          expires_at: dashboardLink.expires_at
+          dashboard_url: null,
+          onboarding_url: accountLink.url,
+          expires_at: accountLink.expires_at
         }
       });
-
     } catch (error) {
       if (error instanceof AppError) {
         throw error;
