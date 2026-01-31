@@ -1220,27 +1220,26 @@ class SalonController {
       }
 
       if (useDashboardLink) {
-        const pathMap = {
-          dashboard: 'dashboard',
-          settings: 'settings',
-          payouts: 'payouts',
-          balance: 'balance/overview',
-          tax: 'tax/overview',
-          'tax-registrations': 'tax/registrations'
-        };
+        const dashboardLink = await stripeService.createDashboardLink(salon.stripe_account_id);
+        let url = dashboardLink.url;
         const target = req.query.target;
-        const segment = pathMap[target] || 'dashboard';
-        const mode = process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_') ? 'test' : 'live';
-
-        const platformAcct = await stripeService.getPlatformAccountId();
-        const url = `https://dashboard.stripe.com/${platformAcct}/connect/view-as/${salon.stripe_account_id}/${mode}/${segment}`;
+        const pathMap = {
+          dashboard: '/dashboard',
+          settings: '/settings',
+          payouts: '/payouts',
+          balance: '/balance/overview',
+          tax: '/tax/overview',
+          'tax-registrations': '/tax/registrations'
+        };
+        const path = pathMap[target] || '/dashboard';
+        url = url.replace(/\/?$/, '') + path;
 
         return res.status(200).json({
           success: true,
           data: {
             dashboard_url: url,
             onboarding_url: null,
-            expires_at: null
+            expires_at: dashboardLink.expires_at
           }
         });
       }
