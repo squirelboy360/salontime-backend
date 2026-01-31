@@ -308,7 +308,7 @@ class BookingController {
 
   // Get salon's bookings (for salon owners)
   getSalonBookings = asyncHandler(async (req, res) => {
-    const { status, date, page = 1, limit = 20 } = req.query;
+    const { status, date, page = 1, limit = 20, staff_id } = req.query;
     const offset = (page - 1) * limit;
 
     try {
@@ -323,7 +323,7 @@ class BookingController {
         throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
       }
 
-      console.log(`📋 Fetching bookings for salon: ${salon.id}, status: ${status || 'all'}, date: ${date || 'all'}`);
+      console.log(`📋 Fetching bookings for salon: ${salon.id}, status: ${status || 'all'}, date: ${date || 'all'}, staff_id: ${staff_id || 'all'}`);
 
       let query = supabaseAdmin
         .from('bookings')
@@ -345,6 +345,10 @@ class BookingController {
 
       if (date) {
         query = query.eq('appointment_date', date);
+      }
+
+      if (staff_id) {
+        query = query.eq('staff_id', staff_id);
       }
 
       const { data: bookings, error } = await query;

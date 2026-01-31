@@ -1957,6 +1957,103 @@ class SalonController {
       data: { employees: staffList || [] }
     });
   });
+
+  // Employee performance stats (bookings count, revenue per staff) for owner
+  getEmployeeStats = asyncHandler(async (req, res) => {
+    const { data: salon } = await supabaseAdmin
+      .from('salons')
+      .select('id')
+      .eq('owner_id', req.user.id)
+      .single();
+
+    if (!salon) {
+      throw new AppError('No salon found for this user', 404, 'SALON_NOT_FOUND');
+    }
+
+    const period = parseInt(req.query.period) || 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - period);
+    const startIso = startDate.toISOString();
+
+    const { data: staffList, error: staffError } = await supabaseAdmin
+      .from('staff')
+      .select('id, name, email, phone, is_active, user_id, created_at')
+      .eq('salon_id', salon.id)
+      .not('user_id', 'is', null)
+      .order('name');
+
+    if (staffError) {
+      throw new AppError('Failed to fetch employees', 500, 'EMPLOYEES_FETCH_FAILED');
+    }
+
+    const { data: bookings, error: bookError } = await supabaseAdmin
+      .from('bookings')
+      .select('id, staff_id, appointment_date, status')
+      .eq('salon_id', salon.id)
+      .gte('appointment_date', startIso.split('T')[0]);
+
+    if (bookError) {
+      throw new AppError('Failed to fetch bookings for stats', 500, 'STATS_FETCH_FAILED');
+    }
+
+    const bookingIds = (bookings || []).map(b => b.id).filter(Boolean);
+    let paymentByBooking = {};
+    if (bookingIds.length > 0) {
+      const { data: payments, error: payError } = await supabaseAdmin
+        .from('payments')
+        .select('booking_id, amount, status')
+        .in('booking_id', bookingIds)
+        .in('status', ['succeeded', 'paid', 'completed']);
+
+      if (!payError && payments) {
+        payments.forEach(p => {
+          if (p.booking_id) paymentByBooking[p.booking_id] = parseFloat(p.amount || 0);
+        });
+      }
+    }
+
+    const bookingById = {};
+    (bookings || []).forEach(b => { bookingById[b.id] = b; });
+
+    const statsByStaff = {};
+    (staffList || []).forEach(s => {
+      statsByStaff[s.id] = {
+        staff_id: s.id,
+        name: s.name,
+        email: s.email,
+        phone: s.phone,
+        is_active: s.is_active,
+        user_id: s.user_id,
+        created_at: s.created_at,
+        bookings_count: 0,
+        completed_count: 0,
+        revenue: 0
+      };
+    });
+
+    (bookings || []).forEach(b => {
+      if (!b.staff_id) return;
+      if (!statsByStaff[b.staff_id]) return;
+      statsByStaff[b.staff_id].bookings_count++;
+      if (b.status === 'completed') statsByStaff[b.staff_id].completed_count++;
+      const amt = paymentByBooking[b.id];
+      if (amt) statsByStaff[b.staff_id].revenue += amt;
+    });
+
+    const list = Object.values(statsByStaff);
+    list.forEach(s => { s.revenue = Math.round(s.revenue * 100) / 100; });
+    list.sort((a, b) => (b.bookings_count || 0) - (a.bookings_count || 0));
+
+    res.status(200).json({
+      success: true,
+      data: {
+        employees: list,
+        period_days: period,
+        start_date: startIso,
+        end_date: new Date().toISOString()
+      }
+    });
+  });
 }
 
 module.exports = new SalonController();
