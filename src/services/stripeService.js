@@ -3,6 +3,8 @@ const { AppError } = require('../middleware/errorHandler');
 const config = require('../config');
 const { supabaseAdmin } = require('../config/database');
 
+let _platformAccountId = null;
+
 class StripeService {
   constructor() {
     this.stripe = stripe;
@@ -92,6 +94,18 @@ class StripeService {
     } catch (error) {
       throw new AppError(`Failed to retrieve account status: ${error.message}`, 500, 'STRIPE_ACCOUNT_RETRIEVAL_FAILED');
     }
+  }
+
+  /**
+   * Get the platform's own Stripe account ID (for constructing dashboard view-as URLs).
+   * Cached after first fetch.
+   */
+  async getPlatformAccountId() {
+    this._checkStripeEnabled();
+    if (_platformAccountId) return _platformAccountId;
+    const account = await this.stripe.accounts.retrieve();
+    _platformAccountId = account.id;
+    return account.id;
   }
 
   /**
