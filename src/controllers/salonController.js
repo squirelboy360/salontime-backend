@@ -1223,9 +1223,16 @@ class SalonController {
         const dashboardLink = await stripeService.createDashboardLink(salon.stripe_account_id);
         let url = dashboardLink.url;
         const target = req.query.target;
-        if (target === 'settings') {
-          url = url.replace(/\/?$/, '') + '/settings';
-        }
+        const pathMap = {
+          dashboard: '/dashboard',
+          settings: '/settings',
+          payouts: '/payouts',
+          balance: '/balance/overview',
+          tax: '/tax/overview',
+          'tax-registrations': '/tax/registrations'
+        };
+        const path = pathMap[target] || '/dashboard';
+        url = url.replace(/\/?$/, '') + path;
         return res.status(200).json({
           success: true,
           data: {
