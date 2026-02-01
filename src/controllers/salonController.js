@@ -367,9 +367,11 @@ class SalonController {
         phone,
         email,
         website,
-        business_hours,
         updated_at: new Date().toISOString()
       };
+
+      // Only update business_hours when explicitly provided (avoids overwriting with null)
+      if (business_hours !== undefined) updateData.business_hours = business_hours;
 
       // Add coordinates if geocoded
       if (latitude !== undefined) updateData.latitude = latitude;

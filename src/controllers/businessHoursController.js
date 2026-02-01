@@ -1,12 +1,12 @@
-const { supabase, getAuthenticatedClient } = require('../config/database');
+const { supabase, supabaseAdmin, getAuthenticatedClient } = require('../config/database');
 
-// Get salon's business hours
+// Get salon's business hours (use admin to bypass RLS - hours are not sensitive)
 exports.getBusinessHours = async (req, res) => {
   const { salonId } = req.params;
 
   try {
     console.log('📋 GET business hours for salon:', salonId);
-    const { data: salon, error } = await supabase
+    const { data: salon, error } = await supabaseAdmin
       .from('salons')
       .select('business_hours, updated_at')
       .eq('id', salonId)
