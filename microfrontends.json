@@ -1,10 +1,18 @@
 {
-    "$schema": "https://openapi.vercel.sh/microfrontends.json",
-    "applications": {
-      "salontime-backend": {
-        "development": {
-          "fallback": "www.salontime.nl"
-        }
+  "$schema": "https://openapi.vercel.sh/microfrontends.json",
+  "applications": {
+    "salontime-backend": {
+      "development": {
+        "fallback": "www.salontime.nl"
+      }
+    },
+    "salontime-landing": {
+      "development": {
+        "src": "/salontime-landing/index.html"
+      },
+      "production": {
+        "src": "/salontime-landing/index.html"
       }
     }
   }
+}

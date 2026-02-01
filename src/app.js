@@ -32,6 +32,8 @@ const aiRoutes = require('./routes/aiRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
 const geocodeRoutes = require('./routes/geocode');
 
+const path = require('path');
+
 // Validate configuration
 config.validate();
 
@@ -76,6 +78,9 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), (req, res
   const stripeService = require('./services/stripeService');
   stripeService.handleWebhook(req, res);
 });
+
+// Static files for landing page
+app.use('/salontime-landing', express.static(path.join(__dirname, '../salontime-landing')));
 
 // Apply rate limiting to API routes
 app.use('/api/', limiter);
@@ -168,8 +173,12 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/geocode', geocodeRoutes);
 
-// Root endpoint
+// Root endpoint: Serve landing page if exists, otherwise JSON
 app.get('/', (req, res) => {
+  const landingPath = path.join(__dirname, '../salontime-landing/index.html');
+  if (require('fs').existsSync(landingPath)) {
+    return res.sendFile(landingPath);
+  }
   res.status(200).json({
     success: true,
     message: 'Welcome to SalonTime API',
