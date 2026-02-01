@@ -2,11 +2,20 @@
   "$schema": "https://openapi.vercel.sh/microfrontends.json",
   "applications": {
     "salontime-backend": {
+      "routing": [
+        { "prefix": "/api" },
+        { "prefix": "/webhook" },
+        { "prefix": "/auth" },
+        { "prefix": "/health" }
+      ],
       "development": {
         "fallback": "www.salontime.nl"
       }
     },
     "salontime-landing": {
+      "routing": [
+        { "prefix": "/" }
+      ],
       "development": {
         "src": "/salontime-landing/index.html"
       },
