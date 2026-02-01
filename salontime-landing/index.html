@@ -99,7 +99,7 @@
         <div class="phone-wrap">
           <div class="iphone-14">
             <div class="iphone-14-notch"></div>
-            <div class="iphone-14-screen">
+           x <div class="iphone-14-screen">
               <img src="images/bookings-en.png" id="img-bookings" alt="Bookings list" class="screen-img">
               <div class="screen-glass"></div>
             </div>
@@ -228,37 +228,60 @@
       }
     };
 
-    const langSwitcher = document.getElementById('lang-switcher');
-    const imgDash = document.getElementById('img-dash');
-    const imgClient = document.getElementById('img-client');
-    const imgBookings = document.getElementById('img-bookings');
-
     function updateLanguage(lang) {
-      // Update text
+      console.log('Updating UI for language:', lang);
+      
+      // Persist state in localStorage
+      localStorage.setItem('salontime_lang', lang);
+      
+      const langSwitcher = document.getElementById('lang-switcher');
+      const imgDash = document.getElementById('img-dash');
+      const imgClient = document.getElementById('img-client');
+      const imgBookings = document.getElementById('img-bookings');
+
+      // Update text elements
       document.querySelectorAll('[data-i18n]').forEach(el => {
         const key = el.getAttribute('data-i18n');
-        if (translations[lang][key]) {
+        if (translations[lang] && translations[lang][key]) {
           el.textContent = translations[lang][key];
         }
       });
 
-      // Update images
-      imgDash.src = `images/dash-${lang}.png`;
-      imgClient.src = `images/client-${lang}.png`;
-      imgBookings.src = `images/bookings-${lang}.png`;
+      // Update image sources
+      if (imgDash) imgDash.src = `images/dash-${lang}.png`;
+      if (imgClient) imgClient.src = `images/client-${lang}.png`;
+      if (imgBookings) imgBookings.src = `images/bookings-${lang}.png`;
 
-      // Update page class
+      // Update state classes
       document.body.className = `lang-${lang}`;
-      langSwitcher.value = lang;
+      document.documentElement.lang = lang;
+      if (langSwitcher) langSwitcher.value = lang;
     }
 
-    // Auto-detect language
-    const userLang = navigator.language.startsWith('nl') ? 'nl' : 'en';
-    updateLanguage(userLang);
+    // Initialize State Management
+    (function init() {
+      // Priority: 1. saved preference, 2. browser language, 3. English
+      const savedLang = localStorage.getItem('salontime_lang');
+      const browserLang = navigator.language.startsWith('nl') ? 'nl' : 'en';
+      const initialLang = savedLang || browserLang;
 
-    langSwitcher.addEventListener('change', (e) => {
-      updateLanguage(e.target.value);
-    });
+      // Handle timing based on document state
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => updateLanguage(initialLang));
+      } else {
+        updateLanguage(initialLang);
+      }
+
+      // Add listener after full load to ensure dropdown exists
+      window.addEventListener('load', () => {
+        const langSwitcher = document.getElementById('lang-switcher');
+        if (langSwitcher) {
+          langSwitcher.addEventListener('change', (e) => {
+            updateLanguage(e.target.value);
+          });
+        }
+      });
+    })();
   </script>
 </body>
 </html>

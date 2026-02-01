@@ -81,6 +81,7 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), (req, res
 
 // Static files for landing page
 app.use('/salontime-landing', express.static(path.join(__dirname, '../salontime-landing')));
+app.use(express.static(path.join(__dirname, '../salontime-landing')));
 
 // Apply rate limiting to API routes
 app.use('/api/', limiter);
