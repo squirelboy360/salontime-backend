@@ -1,5 +1,6 @@
 const supabaseService = require('../services/supabaseService');
 const emailService = require('../services/emailService');
+const whatsappService = require('../services/whatsappService');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const { supabase, supabaseAdmin, getAuthenticatedClient } = require('../config/database');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
@@ -63,16 +64,19 @@ class BookingController {
       // Get authenticated Supabase client with user's token for RLS
       const authenticatedSupabase = getAuthenticatedClient(req.token);
 
-      // Check for conflicts - proper overlap detection
-      // Two time slots overlap if: start1 < end2 AND start2 < end1
-      const { data: conflicts } = await authenticatedSupabase
-        .from('bookings')
-        .select('id')
-        .eq('salon_id', salon_id)
-        .eq('appointment_date', appointment_date)
-        .neq('status', 'cancelled')
-        .lt('start_time', endTimeStr)
-        .gt('end_time', start_time);
+      // Check for conflicts - when staff_id set, only that staff's bookings; else any booking (salon-wide)
+      const { data: conflicts } = await (() => {
+        let q = authenticatedSupabase
+          .from('bookings')
+          .select('id')
+          .eq('salon_id', salon_id)
+          .eq('appointment_date', appointment_date)
+          .neq('status', 'cancelled')
+          .lt('start_time', endTimeStr)
+          .gt('end_time', start_time);
+        if (staff_id) q = q.eq('staff_id', staff_id);
+        return q;
+      })();
 
       if (conflicts && conflicts.length > 0) {
         throw new AppError('Time slot not available', 409, 'TIME_SLOT_CONFLICT');
@@ -191,6 +195,57 @@ class BookingController {
         client,
         service.salons
       );
+
+      // WhatsApp: notify staff + salon owner (from salon's number)
+      const salonPhoneId = salon.whatsapp_phone_number_id || null;
+      if (whatsappService.isEnabled(salonPhoneId)) {
+        try {
+          const clientName = [client?.first_name, client?.last_name].filter(Boolean).join(' ') || 'Client';
+          const payload = {
+            clientName,
+            serviceName: service.name,
+            date: appointment_date,
+            time: start_time,
+          };
+          const recipients = [];
+
+          // Owner
+          const { data: ownerProfile } = await supabaseAdmin
+            .from('user_profiles')
+            .select('phone')
+            .eq('id', salon.owner_id)
+            .single();
+          if (ownerProfile?.phone) recipients.push({ phone: ownerProfile.phone });
+
+          // Staff (employees) - include assigned staff and all active staff
+          const { data: staffList } = await supabaseAdmin
+            .from('staff')
+            .select('id, phone, user_id')
+            .eq('salon_id', salon_id)
+            .eq('is_active', true);
+          for (const s of staffList || []) {
+            let phone = s.phone;
+            if (!phone && s.user_id) {
+              const { data: up } = await supabaseAdmin
+                .from('user_profiles')
+                .select('phone')
+                .eq('id', s.user_id)
+                .single();
+              phone = up?.phone;
+            }
+            if (phone && !recipients.some((r) => r.phone === phone)) {
+              recipients.push({ phone });
+            }
+          }
+
+          const lang = req.headers['accept-language']?.includes('nl') ? 'nl' : 'en';
+          for (const r of recipients) {
+            await whatsappService.sendNewBookingNotification(r.phone, payload, lang, salonPhoneId);
+          }
+        } catch (waErr) {
+          console.warn('WhatsApp booking notification failed:', waErr?.message || waErr);
+        }
+      }
 
       res.status(201).json({
         success: true,

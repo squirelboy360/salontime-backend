@@ -315,7 +315,8 @@ class SalonController {
       amenities,
       images,
       latitude: providedLatitude,
-      longitude: providedLongitude
+      longitude: providedLongitude,
+      whatsapp_phone_number_id
     } = req.body;
 
     try {
@@ -378,6 +379,7 @@ class SalonController {
       if (state !== undefined) updateData.state = state;
       if (amenities !== undefined) updateData.amenities = amenities;
       if (images !== undefined) updateData.images = images;
+      if (whatsapp_phone_number_id !== undefined) updateData.whatsapp_phone_number_id = whatsapp_phone_number_id || null;
 
       const { data: salon, error } = await supabaseAdmin
         .from('salons')
@@ -1496,6 +1498,79 @@ class SalonController {
         throw error;
       }
       throw new AppError('Failed to fetch salon services', 500, 'SERVICES_FETCH_FAILED');
+    }
+  });
+
+  // Get staff/employees for a salon (public - for booking flow)
+  getSalonStaff = asyncHandler(async (req, res) => {
+    const { salonId } = req.params;
+
+    try {
+      const { data: salon, error: salonError } = await supabase
+        .from('salons')
+        .select('id, owner_id, is_active')
+        .eq('id', salonId)
+        .single();
+
+      if (salonError || !salon) {
+        throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
+      }
+      if (!salon.is_active) {
+        throw new AppError('Salon is not active', 403, 'SALON_NOT_ACTIVE');
+      }
+
+      const staffList = [];
+
+      // Include owner as first option (if they have a profile)
+      const { data: ownerProfile } = await supabaseAdmin
+        .from('user_profiles')
+        .select('id, first_name, last_name, avatar_url')
+        .eq('id', salon.owner_id)
+        .single();
+      if (ownerProfile) {
+        const ownerName = [ownerProfile.first_name, ownerProfile.last_name].filter(Boolean).join(' ') || 'Owner';
+        staffList.push({
+          id: null,
+          name: ownerName,
+          avatar_url: ownerProfile.avatar_url,
+          is_owner: true,
+        });
+      }
+
+      // Add employees (staff with user_id)
+      const { data: employees } = await supabaseAdmin
+        .from('staff')
+        .select('id, name, user_id')
+        .eq('salon_id', salonId)
+        .eq('is_active', true)
+        .not('user_id', 'is', null)
+        .order('created_at');
+
+      for (const emp of employees || []) {
+        let avatarUrl = null;
+        if (emp.user_id) {
+          const { data: up } = await supabaseAdmin
+            .from('user_profiles')
+            .select('avatar_url')
+            .eq('id', emp.user_id)
+            .single();
+          avatarUrl = up?.avatar_url;
+        }
+        staffList.push({
+          id: emp.id,
+          name: emp.name || 'Staff',
+          avatar_url: avatarUrl,
+          is_owner: false,
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        data: { staff: staffList }
+      });
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError('Failed to fetch salon staff', 500, 'STAFF_FETCH_FAILED');
     }
   });
 

@@ -10,6 +10,7 @@ router.get('/popular', salonController.getPopularSalons);
 router.get('/search', salonController.searchSalons);
 router.get('/:salonId', salonController.getSalon);
 router.get('/:salonId/services', salonController.getSalonServices);
+router.get('/:salonId/staff', salonController.getSalonStaff);
 
 // Tracking routes (optional auth - tracks anonymous users too)
 router.post('/:salonId/track-view', salonController.trackSalonView);

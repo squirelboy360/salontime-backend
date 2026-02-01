@@ -1,5 +1,6 @@
 const stripeService = require('../services/stripeService');
-const { supabase } = require('../config/database');
+const { supabase, supabaseAdmin } = require('../config/database');
+const whatsappService = require('../services/whatsappService');
 const config = require('../config');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 
@@ -568,6 +569,53 @@ class PaymentController {
               console.error('Failed to update booking status:', bookingError);
             } else {
               console.log(`✅ Updated booking ${existingPayment.booking_id} status to 'confirmed'`);
+            }
+          }
+
+          // WhatsApp: notify customer and salon owner (from salon's number)
+          if (existingPayment.booking_id) {
+            try {
+              const { data: booking } = await supabaseAdmin
+                .from('bookings')
+                .select('client_id, salon_id, appointment_date, start_time')
+                .eq('id', existingPayment.booking_id)
+                .single();
+              if (booking) {
+                const { data: salonData } = await supabaseAdmin
+                  .from('salons')
+                  .select('owner_id, business_name, whatsapp_phone_number_id')
+                  .eq('id', booking.salon_id)
+                  .single();
+                const salonPhoneId = salonData?.whatsapp_phone_number_id || null;
+                if (whatsappService.isEnabled(salonPhoneId)) {
+                  const amount = (existingPayment.amount || paymentIntent.amount / 100).toFixed(2);
+                  const date = booking.appointment_date || new Date().toISOString().split('T')[0];
+                  const payload = { amount: `€${amount}`, salonName: salonData?.business_name || 'Salon', date };
+
+                  const recipients = [];
+                  const { data: clientProfile } = await supabaseAdmin
+                    .from('user_profiles')
+                    .select('phone')
+                    .eq('id', booking.client_id)
+                    .single();
+                  if (clientProfile?.phone) recipients.push(clientProfile.phone);
+                  if (salonData?.owner_id) {
+                    const { data: ownerProfile } = await supabaseAdmin
+                      .from('user_profiles')
+                      .select('phone')
+                      .eq('id', salonData.owner_id)
+                      .single();
+                    if (ownerProfile?.phone && !recipients.includes(ownerProfile.phone)) {
+                      recipients.push(ownerProfile.phone);
+                    }
+                  }
+                  for (const phone of recipients) {
+                    await whatsappService.sendPaymentSuccessNotification(phone, payload, 'en', salonPhoneId);
+                  }
+                }
+              }
+            } catch (waErr) {
+              console.warn('WhatsApp payment notification failed:', waErr?.message || waErr);
             }
           }
         }
