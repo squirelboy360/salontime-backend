@@ -1,26 +1,24 @@
 {
   "$schema": "https://openapi.vercel.sh/microfrontends.json",
   "applications": {
-    "salontime-backend": {
-      "routing": [
-        { "prefix": "/api" },
-        { "prefix": "/webhook" },
-        { "prefix": "/auth" },
-        { "prefix": "/health" }
-      ],
+    "salontime-landing": {
       "development": {
         "fallback": "www.salontime.nl"
       }
     },
-    "salontime-landing": {
+    "salontime-backend": {
       "routing": [
-        { "prefix": "/" }
+        {
+          "paths": [
+            "/api/:path*",
+            "/webhook/:path*",
+            "/auth/:path*",
+            "/health"
+          ]
+        }
       ],
       "development": {
-        "src": "/salontime-landing/index.html"
-      },
-      "production": {
-        "src": "/salontime-landing/index.html"
+        "fallback": "www.salontime.nl"
       }
     }
   }
