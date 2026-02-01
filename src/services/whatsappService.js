@@ -2,8 +2,8 @@
  * WhatsApp Business Cloud API service.
  * Messages send FROM the salon owner's number (salon.whatsapp_phone_number_id).
  * Platform token from env; each salon has their own Phone Number ID when set.
+ * Uses native fetch (Node 18+) for CommonJS compatibility.
  */
-const fetch = require('node-fetch');
 
 const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
 const FALLBACK_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID; // fallback if salon has none
