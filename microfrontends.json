@@ -1,0 +1,10 @@
+{
+    "$schema": "https://openapi.vercel.sh/microfrontends.json",
+    "applications": {
+      "salontime-backend": {
+        "development": {
+          "fallback": "www.salontime.nl"
+        }
+      }
+    }
+  }
