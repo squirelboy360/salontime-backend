@@ -361,24 +361,44 @@ class BookingController {
     }
   });
 
-  // Get salon's bookings (for salon owners)
+  // Get salon's bookings (for salon owners or staff with staff_id filter)
   getSalonBookings = asyncHandler(async (req, res) => {
-    const { status, date, page = 1, limit = 20, staff_id } = req.query;
+    const { status, date, page = 1, limit = 20, staff_id: queryStaffId, salon_id: querySalonId } = req.query;
     const offset = (page - 1) * limit;
 
     try {
-      // Get user's salon
-      const { data: salon, error: salonError } = await supabaseAdmin
+      let salonId;
+      let filterStaffId = queryStaffId;
+
+      // Owner: use owner's salon
+      const { data: ownerSalon, error: salonError } = await supabaseAdmin
         .from('salons')
         .select('id')
         .eq('owner_id', req.user.id)
         .single();
 
-      if (salonError || !salon) {
+      if (ownerSalon) {
+        salonId = ownerSalon.id;
+      } else if (querySalonId) {
+        // Staff: must pass salon_id and will only see their own bookings
+        const { data: staffRow } = await supabaseAdmin
+          .from('staff')
+          .select('id')
+          .eq('user_id', req.user.id)
+          .eq('salon_id', querySalonId)
+          .eq('is_active', true)
+          .limit(1)
+          .single();
+        if (!staffRow) {
+          throw new AppError('Not a staff member of this salon', 403, 'STAFF_NOT_FOUND');
+        }
+        salonId = querySalonId;
+        filterStaffId = staffRow.id; // Force filter to this staff's bookings
+      } else {
         throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
       }
 
-      console.log(`📋 Fetching bookings for salon: ${salon.id}, status: ${status || 'all'}, date: ${date || 'all'}, staff_id: ${staff_id || 'all'}`);
+      console.log(`📋 Fetching bookings for salon: ${salonId}, status: ${status || 'all'}, date: ${date || 'all'}, staff_id: ${filterStaffId || 'all'}`);
 
       let query = supabaseAdmin
         .from('bookings')
@@ -389,7 +409,7 @@ class BookingController {
           staff(*),
           payments(*)
         `)
-        .eq('salon_id', salon.id)
+        .eq('salon_id', salonId)
         .order('appointment_date', { ascending: true })
         .order('start_time', { ascending: true })
         .range(offset, offset + limit - 1);
@@ -402,8 +422,8 @@ class BookingController {
         query = query.eq('appointment_date', date);
       }
 
-      if (staff_id) {
-        query = query.eq('staff_id', staff_id);
+      if (filterStaffId) {
+        query = query.eq('staff_id', filterStaffId);
       }
 
       const { data: bookings, error } = await query;
@@ -413,7 +433,7 @@ class BookingController {
         throw new AppError('Failed to fetch salon bookings', 500, 'SALON_BOOKINGS_FETCH_FAILED');
       }
 
-      console.log(`✅ Found ${bookings?.length || 0} bookings for salon ${salon.id}`);
+      console.log(`✅ Found ${bookings?.length || 0} bookings for salon ${salonId}`);
 
       res.status(200).json({
         success: true,
@@ -808,7 +828,12 @@ class BookingController {
       }
 
       let currentTime = openHour * 60 + openMinute; // Convert to minutes
-      const endTime = closeHour * 60 + closeMinute;
+      let endTime = closeHour * 60 + closeMinute;
+
+      // Handle overnight hours (e.g. Sunday 10:00 - 02:00 = open until 2 AM Monday)
+      if (endTime <= currentTime) {
+        endTime += 24 * 60; // Add 24 hours
+      }
 
       // Get current time if booking for today - allow booking at current time
       if (appointmentDate) {

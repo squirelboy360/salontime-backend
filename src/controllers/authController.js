@@ -231,7 +231,7 @@ class AuthController {
             first_name: userProfile.first_name,
             last_name: userProfile.last_name,
             phone: userProfile.phone,
-            avatar_url: userProfile.avatar_url,
+            avatar_url: userProfile.avatar_url || userProfile.avatar || null,
             language: userProfile.language,
             created_at: userProfile.created_at,
             updated_at: userProfile.updated_at

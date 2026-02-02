@@ -2029,9 +2029,20 @@ class SalonController {
       throw new AppError('Failed to fetch employees', 500, 'EMPLOYEES_FETCH_FAILED');
     }
 
+    // Enrich with avatar from user_profiles
+    const enriched = [];
+    for (const emp of staffList || []) {
+      let avatar_url = null;
+      if (emp.user_id) {
+        const { data: up } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', emp.user_id).single();
+        avatar_url = up?.avatar_url || up?.avatar || null;
+      }
+      enriched.push({ ...emp, avatar_url });
+    }
+
     res.status(200).json({
       success: true,
-      data: { employees: staffList || [] }
+      data: { employees: enriched }
     });
   });
 
@@ -2093,7 +2104,12 @@ class SalonController {
     (bookings || []).forEach(b => { bookingById[b.id] = b; });
 
     const statsByStaff = {};
-    (staffList || []).forEach(s => {
+    for (const s of staffList || []) {
+      let avatar_url = null;
+      if (s.user_id) {
+        const { data: up } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', s.user_id).single();
+        avatar_url = up?.avatar_url || up?.avatar || null;
+      }
       statsByStaff[s.id] = {
         staff_id: s.id,
         name: s.name,
@@ -2102,11 +2118,12 @@ class SalonController {
         is_active: s.is_active,
         user_id: s.user_id,
         created_at: s.created_at,
+        avatar_url,
         bookings_count: 0,
         completed_count: 0,
         revenue: 0
       };
-    });
+    }
 
     (bookings || []).forEach(b => {
       if (!b.staff_id) return;
@@ -2128,6 +2145,94 @@ class SalonController {
         period_days: period,
         start_date: startIso,
         end_date: new Date().toISOString()
+      }
+    });
+  });
+
+  // Current user's staff record for a salon (for employee dashboard)
+  getStaffMe = asyncHandler(async (req, res) => {
+    const salonId = req.query.salon_id;
+    let query = supabaseAdmin
+      .from('staff')
+      .select('id, name, email, phone, is_active, user_id, salon_id, created_at')
+      .eq('user_id', req.user.id)
+      .eq('is_active', true);
+    if (salonId) query = query.eq('salon_id', salonId);
+    const { data: rows, error } = await query.limit(1);
+    const staffRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    if (error || !staffRow) {
+      throw new AppError('Staff record not found for this salon', 404, 'STAFF_NOT_FOUND');
+    }
+    let avatar_url = null;
+    if (staffRow.user_id) {
+      const { data: up } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', staffRow.user_id).single();
+      avatar_url = up?.avatar_url || up?.avatar || null;
+    }
+    res.status(200).json({
+      success: true,
+      data: {
+        staff_id: staffRow.id,
+        name: staffRow.name,
+        email: staffRow.email,
+        phone: staffRow.phone,
+        is_active: staffRow.is_active,
+        user_id: staffRow.user_id,
+        salon_id: staffRow.salon_id,
+        created_at: staffRow.created_at,
+        avatar_url
+      }
+    });
+  });
+
+  // Current user's stats as staff (for employee dashboard)
+  getStaffMyStats = asyncHandler(async (req, res) => {
+    const salonId = req.query.salon_id;
+    const period = parseInt(req.query.period) || 30;
+    let query = supabaseAdmin
+      .from('staff')
+      .select('id, salon_id')
+      .eq('user_id', req.user.id)
+      .eq('is_active', true);
+    if (salonId) query = query.eq('salon_id', salonId);
+    const { data: staffRows, error: staffErr } = await query.limit(1);
+    const staffRow = Array.isArray(staffRows) && staffRows.length > 0 ? staffRows[0] : null;
+    if (staffErr || !staffRow) {
+      throw new AppError('Staff record not found for this salon', 404, 'STAFF_NOT_FOUND');
+    }
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - period);
+    const startIso = startDate.toISOString();
+    const { data: bookings, error: bookError } = await supabaseAdmin
+      .from('bookings')
+      .select('id, status')
+      .eq('salon_id', staffRow.salon_id || salonId)
+      .eq('staff_id', staffRow.id)
+      .gte('appointment_date', startIso.split('T')[0]);
+    if (bookError) {
+      throw new AppError('Failed to fetch staff stats', 500, 'STATS_FETCH_FAILED');
+    }
+    const bookingIds = (bookings || []).map(b => b.id).filter(Boolean);
+    let revenue = 0;
+    if (bookingIds.length > 0) {
+      const { data: payments } = await supabaseAdmin
+        .from('payments')
+        .select('booking_id, amount')
+        .in('booking_id', bookingIds)
+        .in('status', ['succeeded', 'paid', 'completed']);
+      const paymentByBooking = {};
+      (payments || []).forEach(p => { if (p.booking_id) paymentByBooking[p.booking_id] = parseFloat(p.amount || 0); });
+      revenue = (bookings || []).reduce((sum, b) => sum + (paymentByBooking[b.id] || 0), 0);
+    }
+    const completed_count = (bookings || []).filter(b => b.status === 'completed').length;
+    res.status(200).json({
+      success: true,
+      data: {
+        staff_id: staffRow.id,
+        salon_id: staffRow.salon_id || salonId,
+        bookings_count: (bookings || []).length,
+        completed_count,
+        revenue: Math.round(revenue * 100) / 100,
+        period_days: period
       }
     });
   });

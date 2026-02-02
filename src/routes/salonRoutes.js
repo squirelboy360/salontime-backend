@@ -29,6 +29,8 @@ router.put('/my/salon', salonController.updateSalon);
 router.get('/my/join-code', salonController.getJoinCode);
 router.get('/my/employees', salonController.getMyEmployees);
 router.get('/my/employee-stats', salonController.getEmployeeStats);
+router.get('/my/staff-me', salonController.getStaffMe);
+router.get('/my/staff-my-stats', salonController.getStaffMyStats);
 router.get('/clients', salonController.getSalonClients);
 
 // Employee join/leave (any authenticated user)
