@@ -2020,7 +2020,7 @@ class SalonController {
 
     const { data: staffList, error } = await supabaseAdmin
       .from('staff')
-      .select('id, name, email, phone, is_active, user_id, created_at')
+      .select('id, name, email, phone, is_active, user_id, created_at, clocked_in_at')
       .eq('salon_id', salon.id)
       .not('user_id', 'is', null)
       .order('created_at', { ascending: false });
@@ -2065,7 +2065,7 @@ class SalonController {
 
     const { data: staffList, error: staffError } = await supabaseAdmin
       .from('staff')
-      .select('id, name, email, phone, is_active, user_id, created_at')
+      .select('id, name, email, phone, is_active, user_id, created_at, clocked_in_at')
       .eq('salon_id', salon.id)
       .not('user_id', 'is', null)
       .order('name');
@@ -2118,6 +2118,7 @@ class SalonController {
         is_active: s.is_active,
         user_id: s.user_id,
         created_at: s.created_at,
+        clocked_in_at: s.clocked_in_at || null,
         avatar_url,
         bookings_count: 0,
         completed_count: 0,
@@ -2154,7 +2155,7 @@ class SalonController {
     const salonId = req.query.salon_id;
     let query = supabaseAdmin
       .from('staff')
-      .select('id, name, email, phone, is_active, user_id, salon_id, created_at')
+      .select('id, name, email, phone, is_active, user_id, salon_id, created_at, availability_schedule, clocked_in_at')
       .eq('user_id', req.user.id)
       .eq('is_active', true);
     if (salonId) query = query.eq('salon_id', salonId);
@@ -2179,8 +2180,172 @@ class SalonController {
         user_id: staffRow.user_id,
         salon_id: staffRow.salon_id,
         created_at: staffRow.created_at,
-        avatar_url
+        avatar_url,
+        availability_schedule: staffRow.availability_schedule || null,
+        clocked_in_at: staffRow.clocked_in_at || null
       }
+    });
+  });
+
+  // Get current staff's availability schedule
+  getStaffAvailability = asyncHandler(async (req, res) => {
+    const salonId = req.query.salon_id;
+    let query = supabaseAdmin
+      .from('staff')
+      .select('id, availability_schedule')
+      .eq('user_id', req.user.id)
+      .eq('is_active', true);
+    if (salonId) query = query.eq('salon_id', salonId);
+    const { data: rows, error } = await query.limit(1);
+    const staffRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    if (error || !staffRow) {
+      throw new AppError('Staff record not found for this salon', 404, 'STAFF_NOT_FOUND');
+    }
+    res.status(200).json({
+      success: true,
+      data: { availability_schedule: staffRow.availability_schedule || null }
+    });
+  });
+
+  // Update current staff's availability schedule. Staff hours must be within salon opening/closing (cannot override).
+  updateStaffAvailability = asyncHandler(async (req, res) => {
+    const { salon_id: salonId, availability_schedule } = req.body;
+    if (!salonId) {
+      throw new AppError('salon_id is required', 400, 'MISSING_SALON_ID');
+    }
+    const { data: staffRows, error: fetchErr } = await supabaseAdmin
+      .from('staff')
+      .select('id')
+      .eq('user_id', req.user.id)
+      .eq('salon_id', salonId)
+      .eq('is_active', true)
+      .limit(1);
+    const staffRow = Array.isArray(staffRows) && staffRows.length > 0 ? staffRows[0] : null;
+    if (fetchErr || !staffRow) {
+      throw new AppError('Staff record not found for this salon', 404, 'STAFF_NOT_FOUND');
+    }
+    const { data: salonRow } = await supabaseAdmin
+      .from('salons')
+      .select('business_hours')
+      .eq('id', salonId)
+      .single();
+    const salonHours = salonRow?.business_hours || {};
+    const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    const clamped = {};
+    for (const day of days) {
+      const staffDay = availability_schedule?.[day];
+      const salonDay = salonHours[day];
+      const salonClosed = salonDay?.closed === true;
+      const salonOpen = (salonDay?.opening ?? salonDay?.open) || '00:00';
+      const salonClose = (salonDay?.closing ?? salonDay?.close) || '23:59';
+      if (!staffDay) {
+        clamped[day] = salonClosed ? { closed: true, opening: salonOpen, closing: salonClose } : { closed: false, opening: salonOpen, closing: salonClose };
+        continue;
+      }
+      if (salonClosed) {
+        clamped[day] = { closed: true, opening: salonOpen, closing: salonClose };
+        continue;
+      }
+      let open = staffDay.opening ?? staffDay.open ?? salonOpen;
+      let close = staffDay.closing ?? staffDay.close ?? salonClose;
+      if (staffDay.closed) {
+        clamped[day] = { closed: true, opening: salonOpen, closing: salonClose };
+        continue;
+      }
+      if (open < salonOpen) open = salonOpen;
+      if (close > salonClose) close = salonClose;
+      if (open >= close) {
+        open = salonOpen;
+        close = salonClose;
+      }
+      clamped[day] = { closed: false, opening: open, closing: close };
+    }
+    const { error: updateErr } = await supabaseAdmin
+      .from('staff')
+      .update({ availability_schedule: clamped })
+      .eq('id', staffRow.id);
+    if (updateErr) {
+      throw new AppError('Failed to update availability', 500, 'AVAILABILITY_UPDATE_FAILED');
+    }
+    res.status(200).json({
+      success: true,
+      data: { availability_schedule: clamped }
+    });
+  });
+
+  // Staff clock in: set clocked_in_at, notify salon owner
+  clockIn = asyncHandler(async (req, res) => {
+    const { salon_id: salonId } = req.body;
+    if (!salonId) {
+      throw new AppError('salon_id is required', 400, 'MISSING_SALON_ID');
+    }
+    const { data: staffRows, error: staffErr } = await supabaseAdmin
+      .from('staff')
+      .select('id, name, salon_id')
+      .eq('user_id', req.user.id)
+      .eq('salon_id', salonId)
+      .eq('is_active', true)
+      .limit(1);
+    const staffRow = Array.isArray(staffRows) && staffRows.length > 0 ? staffRows[0] : null;
+    if (staffErr || !staffRow) {
+      throw new AppError('Staff record not found for this salon', 404, 'STAFF_NOT_FOUND');
+    }
+    const now = new Date().toISOString();
+    const { error: updateErr } = await supabaseAdmin
+      .from('staff')
+      .update({ clocked_in_at: now })
+      .eq('id', staffRow.id);
+    if (updateErr) {
+      throw new AppError('Failed to clock in', 500, 'CLOCK_IN_FAILED');
+    }
+    const { data: salonRow } = await supabaseAdmin
+      .from('salons')
+      .select('owner_id')
+      .eq('id', salonId)
+      .single();
+    if (salonRow?.owner_id) {
+      const { error: notifErr } = await supabaseAdmin.from('notifications').insert({
+        user_id: salonRow.owner_id,
+        type: 'staff_clock_in',
+        title: 'Medewerker ingeklokt',
+        body: `${staffRow.name || 'Medewerker'} is ingeklokt.`,
+        data: { staff_id: staffRow.id, staff_name: staffRow.name, salon_id: salonId, clocked_in_at: now }
+      });
+      if (notifErr) console.warn('Could not create clock-in notification for owner:', notifErr.message);
+    }
+    res.status(200).json({
+      success: true,
+      data: { clocked_in_at: now, staff_id: staffRow.id }
+    });
+  });
+
+  // Staff clock out: clear clocked_in_at
+  clockOut = asyncHandler(async (req, res) => {
+    const { salon_id: salonId } = req.body;
+    if (!salonId) {
+      throw new AppError('salon_id is required', 400, 'MISSING_SALON_ID');
+    }
+    const { data: staffRows, error: staffErr } = await supabaseAdmin
+      .from('staff')
+      .select('id')
+      .eq('user_id', req.user.id)
+      .eq('salon_id', salonId)
+      .eq('is_active', true)
+      .limit(1);
+    const staffRow = Array.isArray(staffRows) && staffRows.length > 0 ? staffRows[0] : null;
+    if (staffErr || !staffRow) {
+      throw new AppError('Staff record not found for this salon', 404, 'STAFF_NOT_FOUND');
+    }
+    const { error: updateErr } = await supabaseAdmin
+      .from('staff')
+      .update({ clocked_in_at: null })
+      .eq('id', staffRow.id);
+    if (updateErr) {
+      throw new AppError('Failed to clock out', 500, 'CLOCK_OUT_FAILED');
+    }
+    res.status(200).json({
+      success: true,
+      data: { clocked_in_at: null, staff_id: staffRow.id }
     });
   });
 

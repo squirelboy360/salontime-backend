@@ -31,6 +31,10 @@ router.get('/my/employees', salonController.getMyEmployees);
 router.get('/my/employee-stats', salonController.getEmployeeStats);
 router.get('/my/staff-me', salonController.getStaffMe);
 router.get('/my/staff-my-stats', salonController.getStaffMyStats);
+router.get('/my/staff-availability', salonController.getStaffAvailability);
+router.put('/my/staff-availability', salonController.updateStaffAvailability);
+router.post('/my/clock-in', salonController.clockIn);
+router.post('/my/clock-out', salonController.clockOut);
 router.get('/clients', salonController.getSalonClients);
 
 // Employee join/leave (any authenticated user)
