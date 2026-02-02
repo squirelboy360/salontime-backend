@@ -90,8 +90,13 @@ async function sendTemplate(toPhone, templateName, languageCode = 'en', bodyPara
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
+      const msg = data.error?.message || `HTTP ${res.status}`;
+      const code = data.error?.code;
       console.error('WhatsApp API error:', res.status, data);
-      return { success: false, error: data.error?.message || `HTTP ${res.status}` };
+      if (code === 200 && (msg.includes('blocked') || data.error?.type === 'OAuthException')) {
+        console.error('WhatsApp: API access blocked by Meta. Check: Meta Business Suite > WhatsApp > API access; valid token; app in production or test numbers; WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID env vars.');
+      }
+      return { success: false, error: msg };
     }
 
     return { success: true, messageId: data.messages?.[0]?.id };

@@ -196,9 +196,15 @@ class BookingController {
         service.salons
       );
 
-      // WhatsApp: notify staff + salon owner (from salon's number)
+      // WhatsApp: notify client (booker), owner, and staff (from salon's number)
       const salonPhoneId = salon.whatsapp_phone_number_id || null;
-      if (whatsappService.isEnabled(salonPhoneId)) {
+      if (!whatsappService.isEnabled(salonPhoneId)) {
+        if (!process.env.WHATSAPP_ACCESS_TOKEN) {
+          console.info('WhatsApp: skipped (WHATSAPP_ACCESS_TOKEN not set)');
+        } else if (!salonPhoneId && !process.env.WHATSAPP_PHONE_NUMBER_ID) {
+          console.info('WhatsApp: skipped (no salon whatsapp_phone_number_id and no WHATSAPP_PHONE_NUMBER_ID)');
+        }
+      } else {
         try {
           const clientName = [client?.first_name, client?.last_name].filter(Boolean).join(' ') || 'Client';
           const payload = {
@@ -209,13 +215,20 @@ class BookingController {
           };
           const recipients = [];
 
+          // Client (person who booked) – so they get a confirmation via WhatsApp
+          if (client?.phone && !recipients.some((r) => r.phone === client.phone)) {
+            recipients.push({ phone: client.phone });
+          }
+
           // Owner
           const { data: ownerProfile } = await supabaseAdmin
             .from('user_profiles')
             .select('phone')
             .eq('id', salon.owner_id)
             .single();
-          if (ownerProfile?.phone) recipients.push({ phone: ownerProfile.phone });
+          if (ownerProfile?.phone && !recipients.some((r) => r.phone === ownerProfile.phone)) {
+            recipients.push({ phone: ownerProfile.phone });
+          }
 
           // Staff (employees) - include assigned staff and all active staff
           const { data: staffList } = await supabaseAdmin
@@ -685,6 +698,79 @@ class BookingController {
       }
       throw new AppError('Failed to update booking', 500, 'BOOKING_UPDATE_FAILED');
     }
+  });
+
+  // Reassign booking to another staff member (owner or staff at salon only)
+  reassignBooking = asyncHandler(async (req, res) => {
+    const { bookingId } = req.params;
+    const { staff_id: newStaffId } = req.body;
+
+    if (!newStaffId) {
+      throw new AppError('staff_id is required', 400, 'MISSING_STAFF_ID');
+    }
+
+    const { data: booking, error: bookingError } = await supabaseAdmin
+      .from('bookings')
+      .select(`
+        *,
+        salons(owner_id),
+        services(*)
+      `)
+      .eq('id', bookingId)
+      .single();
+
+    if (bookingError || !booking) {
+      throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+    }
+
+    const isOwner = booking.salons.owner_id === req.user.id;
+    let isStaff = false;
+    if (!isOwner) {
+      const { data: staffMember } = await supabaseAdmin
+        .from('staff')
+        .select('id')
+        .eq('salon_id', booking.salon_id)
+        .eq('user_id', req.user.id)
+        .single();
+      isStaff = !!staffMember;
+    }
+    if (!isOwner && !isStaff) {
+      throw new AppError('Insufficient permissions', 403, 'INSUFFICIENT_PERMISSIONS');
+    }
+
+    const { data: newStaff, error: staffError } = await supabaseAdmin
+      .from('staff')
+      .select('id, name')
+      .eq('id', newStaffId)
+      .eq('salon_id', booking.salon_id)
+      .eq('is_active', true)
+      .single();
+
+    if (staffError || !newStaff) {
+      throw new AppError('Staff member not found or not active at this salon', 400, 'INVALID_STAFF');
+    }
+
+    const { data: updatedBooking, error: updateError } = await supabaseAdmin
+      .from('bookings')
+      .update({ staff_id: newStaffId })
+      .eq('id', bookingId)
+      .select(`
+        *,
+        services(*),
+        salons(*),
+        staff(*),
+        user_profiles!client_id(*)
+      `)
+      .single();
+
+    if (updateError) {
+      throw new AppError('Failed to reassign booking', 500, 'REASSIGN_FAILED');
+    }
+
+    res.status(200).json({
+      success: true,
+      data: { booking: updatedBooking }
+    });
   });
 
   // Get available time slots
@@ -1327,7 +1413,7 @@ class BookingController {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
       }
 
-      // Step 2: Get salon to verify ownership
+      // Step 2: Get salon and verify owner or staff at salon
       const { data: salon, error: salonError } = await supabaseAdmin
         .from('salons')
         .select('owner_id')
@@ -1340,8 +1426,19 @@ class BookingController {
         throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
       }
 
-      // Verify the user owns the salon
-      if (salon.owner_id !== req.user.id) {
+      const isOwner = salon.owner_id === req.user.id;
+      let isStaff = false;
+      if (!isOwner) {
+        const { data: staffMember } = await supabaseAdmin
+          .from('staff')
+          .select('id')
+          .eq('salon_id', booking.salon_id)
+          .eq('user_id', req.user.id)
+          .eq('is_active', true)
+          .single();
+        isStaff = !!staffMember;
+      }
+      if (!isOwner && !isStaff) {
         console.log(`❌ Unauthorized: salon owner=${salon.owner_id}, user=${req.user.id}`);
         throw new AppError('Unauthorized', 403, 'UNAUTHORIZED');
       }
@@ -1459,7 +1556,7 @@ class BookingController {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
       }
 
-      // Step 2: Get salon to verify ownership
+      // Step 2: Get salon and verify owner or staff at salon
       const { data: salon, error: salonError } = await supabaseAdmin
         .from('salons')
         .select('owner_id, business_name, stripe_account_id')
@@ -1472,8 +1569,19 @@ class BookingController {
         throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
       }
 
-      // Verify the user owns the salon
-      if (salon.owner_id !== req.user.id) {
+      const isOwner = salon.owner_id === req.user.id;
+      let isStaff = false;
+      if (!isOwner) {
+        const { data: staffMember } = await supabaseAdmin
+          .from('staff')
+          .select('id')
+          .eq('salon_id', booking.salon_id)
+          .eq('user_id', req.user.id)
+          .eq('is_active', true)
+          .single();
+        isStaff = !!staffMember;
+      }
+      if (!isOwner && !isStaff) {
         console.log(`❌ Unauthorized: salon owner=${salon.owner_id}, user=${req.user.id}`);
         throw new AppError('Unauthorized', 403, 'UNAUTHORIZED');
       }
