@@ -108,18 +108,22 @@ async function sendTemplate(toPhone, templateName, languageCode = 'en', bodyPara
 
 /**
  * Send new booking notification (from salon's number).
+ * Default template: appointment_confirmation_1 - "Hello {{1}}, Thank you for booking with {{2}}. Your appointment for {{3}} on {{4}} at {{5}} is confirmed."
+ * Params: [clientName, businessName, serviceName, date, time]
  * @param {string} recipientPhone - Who receives it
- * @param {object} payload - { clientName, serviceName, date, time }
+ * @param {object} payload - { clientName, serviceName, date, time, salonName }
  * @param {string} lang - 'en' or 'nl'
- * @param {string} [salonPhoneNumberId] - Salon's WhatsApp Phone Number ID (sender)
+ * @param {string} [salonPhoneNumberId] - Salon's WhatsApp Phone Number ID (sender); use approved account's Phone Number ID if salon has none
  */
-async function sendNewBookingNotification(recipientPhone, { clientName, serviceName, date, time }, lang = 'en', salonPhoneNumberId = null) {
-  const templateName = process.env.WHATSAPP_TEMPLATE_BOOKING || 'new_booking';
+async function sendNewBookingNotification(recipientPhone, { clientName, serviceName, date, time, salonName }, lang = 'en', salonPhoneNumberId = null) {
+  const templateName = process.env.WHATSAPP_TEMPLATE_BOOKING || 'appointment_confirmation_1';
+  const businessName = salonName || 'Salon';
+  const bodyParams = [clientName, businessName, serviceName, date, time];
   return sendTemplate(
     recipientPhone,
     templateName,
     lang === 'nl' ? 'nl' : 'en',
-    [clientName, serviceName, date, time],
+    bodyParams,
     salonPhoneNumberId
   );
 }

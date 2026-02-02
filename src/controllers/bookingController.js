@@ -207,11 +207,13 @@ class BookingController {
       } else {
         try {
           const clientName = [client?.first_name, client?.last_name].filter(Boolean).join(' ') || 'Client';
+          const salonName = salon.business_name || salon.name || 'Salon';
           const payload = {
             clientName,
             serviceName: service.name,
             date: appointment_date,
             time: start_time,
+            salonName,
           };
           const recipients = [];
 
