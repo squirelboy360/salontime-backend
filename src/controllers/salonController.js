@@ -2068,7 +2068,7 @@ class SalonController {
 
     let { data: staffList, error } = await supabaseAdmin
       .from('staff')
-      .select('id, name, email, phone, is_active, user_id, created_at, clocked_in_at')
+      .select('id, name, email, phone, is_active, user_id, created_at, clocked_in_at, availability_schedule')
       .eq('salon_id', salon.id)
       .not('user_id', 'is', null)
       .order('created_at', { ascending: false });
@@ -2096,6 +2096,48 @@ class SalonController {
     });
   });
 
+  // Get single employee by staff ID (for owner viewing employee details)
+  getEmployeeById = asyncHandler(async (req, res) => {
+    const { staffId } = req.params;
+
+    const { data: salon } = await supabaseAdmin
+      .from('salons')
+      .select('id, business_hours')
+      .eq('owner_id', req.user.id)
+      .single();
+
+    if (!salon) {
+      throw new AppError('No salon found for this user', 404, 'SALON_NOT_FOUND');
+    }
+
+    const { data: staff, error } = await supabaseAdmin
+      .from('staff')
+      .select('id, name, email, phone, is_active, user_id, created_at, clocked_in_at, availability_schedule')
+      .eq('id', staffId)
+      .eq('salon_id', salon.id)
+      .single();
+
+    if (error || !staff) {
+      throw new AppError('Employee not found', 404, 'EMPLOYEE_NOT_FOUND');
+    }
+
+    // Get avatar from user_profiles
+    let avatar_url = null;
+    if (staff.user_id) {
+      const { data: up } = await supabaseAdmin
+        .from('user_profiles')
+        .select('avatar_url, avatar')
+        .eq('id', staff.user_id)
+        .single();
+      avatar_url = up?.avatar_url || up?.avatar || null;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: { employee: { ...staff, avatar_url } }
+    });
+  });
+
   // Employee performance stats (bookings count, revenue per staff) for owner
   getEmployeeStats = asyncHandler(async (req, res) => {
     const { data: salon } = await supabaseAdmin
@@ -2115,7 +2157,7 @@ class SalonController {
 
     let { data: staffList, error: staffError } = await supabaseAdmin
       .from('staff')
-      .select('id, name, email, phone, is_active, user_id, created_at, clocked_in_at')
+      .select('id, name, email, phone, is_active, user_id, created_at, clocked_in_at, availability_schedule')
       .eq('salon_id', salon.id)
       .not('user_id', 'is', null)
       .order('name');
