@@ -5,8 +5,56 @@ const supabaseService = require('../services/supabaseService');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const config = require('../config');
 
+const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
 function generateJoinCode() {
   return crypto.randomBytes(4).toString('hex').toUpperCase();
+}
+
+/** Parse "HH:mm" to [hour, minute]. Handles invalid values. */
+function parseClosingTime(str) {
+  if (!str || typeof str !== 'string') return [17, 0];
+  const parts = str.trim().split(':');
+  const hour = Math.min(23, Math.max(0, parseInt(parts[0], 10) || 0));
+  const minute = Math.min(59, Math.max(0, parseInt(parts[1], 10) || 0));
+  return [hour, minute];
+}
+
+/**
+ * Clear clocked_in_at for staff who are past their salon's closing time (auto clock-out).
+ * Uses salon business_hours; if current time (UTC) is past closing for the day they clocked in, clear.
+ */
+async function clearStaleClockInsForSalon(salonId, businessHours, staffRows) {
+  if (!staffRows?.length || !businessHours || typeof businessHours !== 'object') return staffRows;
+  const now = new Date();
+  const updated = [];
+  for (const s of staffRows) {
+    if (!s.clocked_in_at) {
+      updated.push(s);
+      continue;
+    }
+    const clockedIn = new Date(s.clocked_in_at);
+    const dayIndex = clockedIn.getUTCDay();
+    const dayKey = DAY_KEYS[dayIndex];
+    const dayHours = businessHours[dayKey];
+    if (dayHours?.closed) {
+      await supabaseAdmin.from('staff').update({ clocked_in_at: null }).eq('id', s.id);
+      updated.push({ ...s, clocked_in_at: null });
+      continue;
+    }
+    const closingStr = dayHours?.closing ?? dayHours?.close ?? '17:00';
+    const [closeHour, closeMinute] = parseClosingTime(closingStr);
+    const closingAt = new Date(clockedIn);
+    closingAt.setUTCHours(closeHour, closeMinute, 0, 0);
+    if (closeHour < 6) closingAt.setUTCDate(closingAt.getUTCDate() + 1);
+    if (now >= closingAt) {
+      await supabaseAdmin.from('staff').update({ clocked_in_at: null }).eq('id', s.id);
+      updated.push({ ...s, clocked_in_at: null });
+    } else {
+      updated.push(s);
+    }
+  }
+  return updated;
 }
 
 class SalonController {
@@ -2010,7 +2058,7 @@ class SalonController {
   getMyEmployees = asyncHandler(async (req, res) => {
     const { data: salon } = await supabaseAdmin
       .from('salons')
-      .select('id')
+      .select('id, business_hours')
       .eq('owner_id', req.user.id)
       .single();
 
@@ -2018,7 +2066,7 @@ class SalonController {
       throw new AppError('No salon found for this user', 404, 'SALON_NOT_FOUND');
     }
 
-    const { data: staffList, error } = await supabaseAdmin
+    let { data: staffList, error } = await supabaseAdmin
       .from('staff')
       .select('id, name, email, phone, is_active, user_id, created_at, clocked_in_at')
       .eq('salon_id', salon.id)
@@ -2028,6 +2076,8 @@ class SalonController {
     if (error) {
       throw new AppError('Failed to fetch employees', 500, 'EMPLOYEES_FETCH_FAILED');
     }
+
+    staffList = await clearStaleClockInsForSalon(salon.id, salon.business_hours || {}, staffList || []);
 
     // Enrich with avatar from user_profiles
     const enriched = [];
@@ -2050,7 +2100,7 @@ class SalonController {
   getEmployeeStats = asyncHandler(async (req, res) => {
     const { data: salon } = await supabaseAdmin
       .from('salons')
-      .select('id')
+      .select('id, business_hours')
       .eq('owner_id', req.user.id)
       .single();
 
@@ -2063,7 +2113,7 @@ class SalonController {
     startDate.setDate(startDate.getDate() - period);
     const startIso = startDate.toISOString();
 
-    const { data: staffList, error: staffError } = await supabaseAdmin
+    let { data: staffList, error: staffError } = await supabaseAdmin
       .from('staff')
       .select('id, name, email, phone, is_active, user_id, created_at, clocked_in_at')
       .eq('salon_id', salon.id)
@@ -2073,6 +2123,8 @@ class SalonController {
     if (staffError) {
       throw new AppError('Failed to fetch employees', 500, 'EMPLOYEES_FETCH_FAILED');
     }
+
+    staffList = await clearStaleClockInsForSalon(salon.id, salon.business_hours || {}, staffList || []);
 
     const { data: bookings, error: bookError } = await supabaseAdmin
       .from('bookings')
@@ -2160,9 +2212,14 @@ class SalonController {
       .eq('is_active', true);
     if (salonId) query = query.eq('salon_id', salonId);
     const { data: rows, error } = await query.limit(1);
-    const staffRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    let staffRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
     if (error || !staffRow) {
       throw new AppError('Staff record not found for this salon', 404, 'STAFF_NOT_FOUND');
+    }
+    if (staffRow.clocked_in_at && staffRow.salon_id) {
+      const { data: salonRow } = await supabaseAdmin.from('salons').select('business_hours').eq('id', staffRow.salon_id).single();
+      const [updated] = await clearStaleClockInsForSalon(staffRow.salon_id, salonRow?.business_hours || {}, [staffRow]);
+      staffRow = updated;
     }
     let avatar_url = null;
     if (staffRow.user_id) {
@@ -2248,6 +2305,8 @@ class SalonController {
       }
       let open = staffDay.opening ?? staffDay.open ?? salonOpen;
       let close = staffDay.closing ?? staffDay.close ?? salonClose;
+      open = typeof open === 'number' ? `${Math.floor(open / 60).toString().padStart(2, '0')}:${(open % 60).toString().padStart(2, '0')}` : String(open ?? salonOpen).trim();
+      close = typeof close === 'number' ? `${Math.floor(close / 60).toString().padStart(2, '0')}:${(close % 60).toString().padStart(2, '0')}` : String(close ?? salonClose).trim();
       if (staffDay.closed) {
         clamped[day] = { closed: true, opening: salonOpen, closing: salonClose };
         continue;
