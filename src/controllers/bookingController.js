@@ -840,14 +840,22 @@ class BookingController {
       const dayOfWeek = days[dateObj.getDay()];
       let businessHours = salon.business_hours?.[dayOfWeek];
 
-      // When staff_id is provided, use staff's availability for that day (overrides salon hours)
+      // When staff_id is provided, use staff's availability and require them to be clocked in
       if (staff_id) {
         const { data: staffRow } = await supabaseAdmin
           .from('staff')
-          .select('availability_schedule')
+          .select('availability_schedule, clocked_in_at')
           .eq('id', staff_id)
           .eq('is_active', true)
           .single();
+        // Employee must be clocked in to receive bookings
+        const clockedInAt = staffRow?.clocked_in_at;
+        if (!clockedInAt || (typeof clockedInAt === 'string' && clockedInAt.trim() === '')) {
+          return res.status(200).json({
+            success: true,
+            data: { available_slots: [] }
+          });
+        }
         const schedule = staffRow?.availability_schedule;
         // Normalize day key to lowercase (DB may store monday/Monday)
         const staffSchedule = schedule?.[dayOfWeek] ?? schedule?.[dayOfWeek.toLowerCase()];
@@ -1089,16 +1097,19 @@ class BookingController {
         throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
       }
 
-      // When staff_id provided, fetch staff availability for slot counts (calendar heatmap)
+      // When staff_id provided, fetch staff availability and require clocked in for slot counts
       let staffSchedule = null;
+      let staffClockedIn = true;
       if (staff_id) {
         const { data: staffRow } = await supabaseAdmin
           .from('staff')
-          .select('availability_schedule')
+          .select('availability_schedule, clocked_in_at')
           .eq('id', staff_id)
           .eq('is_active', true)
           .single();
-        staffSchedule = staffRow?.availability_schedule || null;
+        const clockedInAt = staffRow?.clocked_in_at;
+        staffClockedIn = !!(clockedInAt && (typeof clockedInAt !== 'string' || clockedInAt.trim() !== ''));
+        staffSchedule = staffClockedIn ? (staffRow?.availability_schedule || null) : null;
       }
 
       // Get all bookings in date range
@@ -1135,6 +1146,18 @@ class BookingController {
       const start = new Date(start_date);
       const end = new Date(end_date);
       const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+      // When a specific employee is selected but not clocked in, show no slots for any date
+      if (staff_id && !staffClockedIn) {
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          slotsCountByDate[d.toISOString().split('T')[0]] = 0;
+        }
+        res.status(200).json({
+          success: true,
+          data: { slots_count_by_date: slotsCountByDate }
+        });
+        return;
+      }
 
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         const dateStr = d.toISOString().split('T')[0];
