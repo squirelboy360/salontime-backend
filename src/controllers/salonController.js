@@ -7,6 +7,17 @@ const config = require('../config');
 
 const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
+/** Get avatar URL for a user: first from user_profiles, then from auth user_metadata (OAuth picture). */
+async function getAvatarForUserId(userId) {
+  if (!userId) return null;
+  const { data: up } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', userId).maybeSingle();
+  const url = up?.avatar_url || up?.avatar || null;
+  if (url) return url;
+  const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+  const meta = authUser?.user?.user_metadata;
+  return meta?.avatar_url || meta?.picture || null;
+}
+
 function generateJoinCode() {
   return crypto.randomBytes(4).toString('hex').toUpperCase();
 }
@@ -2079,14 +2090,10 @@ class SalonController {
 
     staffList = await clearStaleClockInsForSalon(salon.id, salon.business_hours || {}, staffList || []);
 
-    // Enrich with avatar from user_profiles
+    // Enrich with avatar (user_profiles then auth OAuth picture)
     const enriched = [];
     for (const emp of staffList || []) {
-      let avatar_url = null;
-      if (emp.user_id) {
-        const { data: up } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', emp.user_id).single();
-        avatar_url = up?.avatar_url || up?.avatar || null;
-      }
+      const avatar_url = await getAvatarForUserId(emp.user_id);
       enriched.push({ ...emp, avatar_url });
     }
 
@@ -2121,16 +2128,7 @@ class SalonController {
       throw new AppError('Employee not found', 404, 'EMPLOYEE_NOT_FOUND');
     }
 
-    // Get avatar from user_profiles
-    let avatar_url = null;
-    if (staff.user_id) {
-      const { data: up } = await supabaseAdmin
-        .from('user_profiles')
-        .select('avatar_url, avatar')
-        .eq('id', staff.user_id)
-        .single();
-      avatar_url = up?.avatar_url || up?.avatar || null;
-    }
+    const avatar_url = await getAvatarForUserId(staff.user_id);
 
     res.status(200).json({
       success: true,
@@ -2199,11 +2197,7 @@ class SalonController {
 
     const statsByStaff = {};
     for (const s of staffList || []) {
-      let avatar_url = null;
-      if (s.user_id) {
-        const { data: up } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', s.user_id).single();
-        avatar_url = up?.avatar_url || up?.avatar || null;
-      }
+      const avatar_url = await getAvatarForUserId(s.user_id);
       statsByStaff[s.id] = {
         staff_id: s.id,
         id: s.id, // Also include as 'id' for consistency
@@ -2265,21 +2259,10 @@ class SalonController {
       const [updated] = await clearStaleClockInsForSalon(staffRow.salon_id, salonRow?.business_hours || {}, [staffRow]);
       staffRow = updated;
     }
-    let avatar_url = null;
-    console.log(`[getStaffMe] staffRow.user_id: ${staffRow.user_id}, req.user.id: ${req.user?.id}`);
-    // First try to get avatar from staff's user_id
-    if (staffRow.user_id) {
-      const { data: up, error: upErr } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', staffRow.user_id).single();
-      console.log(`[getStaffMe] user_profiles lookup by staff.user_id (${staffRow.user_id}):`, up, 'error:', upErr);
-      avatar_url = up?.avatar_url || up?.avatar || null;
-    }
-    // Fallback: try getting avatar from the authenticated user's profile (req.user.id)
+    let avatar_url = await getAvatarForUserId(staffRow.user_id);
     if (!avatar_url && req.user?.id) {
-      const { data: authUp, error: authUpErr } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', req.user.id).single();
-      console.log(`[getStaffMe] Fallback lookup by req.user.id (${req.user.id}):`, authUp, 'error:', authUpErr);
-      avatar_url = authUp?.avatar_url || authUp?.avatar || null;
+      avatar_url = await getAvatarForUserId(req.user.id);
     }
-    console.log(`[getStaffMe] Final avatar_url:`, avatar_url);
     res.status(200).json({
       success: true,
       data: {
