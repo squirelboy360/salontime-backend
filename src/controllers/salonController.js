@@ -7,12 +7,16 @@ const config = require('../config');
 
 const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
-/** Get avatar URL for a user. user_profiles is source of truth (updated on upload); only use auth OAuth when profile has no avatar. */
+/** Get avatar URL for a user. user_profiles is source of truth (updated on upload). Use OAuth only when no profile row exists. */
 async function getAvatarForUserId(userId) {
   if (!userId) return null;
   const { data: up } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', userId).maybeSingle();
-  const fromProfile = (up?.avatar_url || up?.avatar || '').toString().trim();
-  if (fromProfile.length > 0) return fromProfile;
+  // If we have a profile row, use only that — never show OAuth once they have a profile (upload overwrites)
+  if (up != null) {
+    const url = (up.avatar_url ?? up.avatar ?? '').toString().trim();
+    if (url.length > 0) return url;
+    return null; // profile exists but no avatar (cleared) — don't fall back to OAuth
+  }
   const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
   const meta = authUser?.user?.user_metadata;
   return meta?.avatar_url || meta?.picture || null;
