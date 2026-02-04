@@ -2267,8 +2267,12 @@ class SalonController {
     }
     let avatar_url = null;
     if (staffRow.user_id) {
-      const { data: up } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', staffRow.user_id).single();
+      const { data: up, error: upErr } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', staffRow.user_id).single();
+      console.log(`[getStaffMe] Staff ${staffRow.name} (user_id: ${staffRow.user_id}) -> user_profiles:`, up, 'error:', upErr);
       avatar_url = up?.avatar_url || up?.avatar || null;
+      console.log(`[getStaffMe] Final avatar_url:`, avatar_url);
+    } else {
+      console.log(`[getStaffMe] Staff ${staffRow.name} has no user_id`);
     }
     res.status(200).json({
       success: true,
