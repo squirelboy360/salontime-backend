@@ -7,19 +7,23 @@ const config = require('../config');
 
 const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
-/** Get avatar URL for a user. user_profiles is source of truth (updated on upload). Use OAuth only when no profile row exists. */
+/** Get avatar URL for a user. Uses same getUserProfile as /api/user/profile so DB avatar (upload) always wins over OAuth. */
 async function getAvatarForUserId(userId) {
   if (!userId) return null;
-  const { data: up } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', userId).maybeSingle();
-  // If we have a profile row, use only that — never show OAuth once they have a profile (upload overwrites)
-  if (up != null) {
-    const url = (up.avatar_url ?? up.avatar ?? '').toString().trim();
+  try {
+    const profile = await supabaseService.getUserProfile(userId);
+    const url = (profile.avatar_url ?? profile.avatar ?? '').toString().trim();
     if (url.length > 0) return url;
-    return null; // profile exists but no avatar (cleared) — don't fall back to OAuth
+    return null; // profile exists but no avatar — don't show OAuth
+  } catch (err) {
+    // No profile row (e.g. 404) — fall back to auth OAuth picture
+    if (err.code === 'PROFILE_NOT_FOUND' || err.statusCode === 404) {
+      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+      const meta = authUser?.user?.user_metadata;
+      return meta?.avatar_url || meta?.picture || null;
+    }
+    return null;
   }
-  const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
-  const meta = authUser?.user?.user_metadata;
-  return meta?.avatar_url || meta?.picture || null;
 }
 
 function generateJoinCode() {

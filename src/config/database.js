@@ -50,7 +50,8 @@ const getAuthenticatedClient = (accessToken) => {
   );
 };
 
-// Create admin client for server-side operations
+// Create admin client for server-side operations (avatars, cross-user profile reads).
+// Must use SUPABASE_SERVICE_ROLE_KEY so RLS does not block reading other users' profiles (e.g. salon owner viewing employee avatars).
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY,
@@ -61,6 +62,10 @@ const supabaseAdmin = createClient(
     }
   }
 );
+
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn('⚠️  SUPABASE_SERVICE_ROLE_KEY is not set; using anon key. RLS may block reading other users\' profiles (e.g. employee avatars).');
+}
 
 // Test connection
 const testConnection = async () => {
