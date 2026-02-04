@@ -2266,13 +2266,15 @@ class SalonController {
       staffRow = updated;
     }
     let avatar_url = null;
+    // First try to get avatar from staff's user_id
     if (staffRow.user_id) {
-      const { data: up, error: upErr } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', staffRow.user_id).single();
-      console.log(`[getStaffMe] Staff ${staffRow.name} (user_id: ${staffRow.user_id}) -> user_profiles:`, up, 'error:', upErr);
+      const { data: up } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', staffRow.user_id).single();
       avatar_url = up?.avatar_url || up?.avatar || null;
-      console.log(`[getStaffMe] Final avatar_url:`, avatar_url);
-    } else {
-      console.log(`[getStaffMe] Staff ${staffRow.name} has no user_id`);
+    }
+    // Fallback: try getting avatar from the authenticated user's profile (req.user.id)
+    if (!avatar_url && req.user?.id) {
+      const { data: authUp } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', req.user.id).single();
+      avatar_url = authUp?.avatar_url || authUp?.avatar || null;
     }
     res.status(200).json({
       success: true,
