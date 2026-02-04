@@ -616,15 +616,16 @@ class BookingController {
       const isOwner = booking.salons.owner_id === req.user.id;
       const isClient = booking.client_id === req.user.id;
 
-      // Check if user is staff at this salon
+      // Always check staff (so staff can complete/update even when they are also the client)
       let isStaff = false;
-      if (!isOwner && !isClient) {
+      if (!isOwner) {
         const { data: staffMember } = await supabaseAdmin
           .from('staff')
           .select('id')
           .eq('salon_id', booking.salon_id)
           .eq('user_id', req.user.id)
-          .single();
+          .eq('is_active', true)
+          .maybeSingle();
         isStaff = !!staffMember;
       }
 
@@ -634,7 +635,7 @@ class BookingController {
         throw new AppError('Insufficient permissions', 403, 'INSUFFICIENT_PERMISSIONS');
       }
 
-      // Clients can only cancel their own bookings
+      // Clients (who are not owner or staff) can only cancel their own bookings
       if (isClient && !isOwner && !isStaff && status !== 'cancelled') {
         throw new AppError('Clients can only cancel bookings', 403, 'CLIENT_CAN_ONLY_CANCEL');
       }
