@@ -834,12 +834,37 @@ class BookingController {
 
       // Calculate available slots
       // Get day name (monday, tuesday, etc.) from date string
-      // Parse date as local date (not UTC) to avoid timezone issues
       const [year, month, day] = date.split('-').map(Number);
-      const dateObj = new Date(year, month - 1, day); // Month is 0-indexed in Date
+      const dateObj = new Date(year, month - 1, day);
       const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
       const dayOfWeek = days[dateObj.getDay()];
-      const businessHours = salon.business_hours?.[dayOfWeek];
+      let businessHours = salon.business_hours?.[dayOfWeek];
+
+      // When staff_id is provided, use staff's availability for that day (overrides salon hours)
+      if (staff_id) {
+        const { data: staffRow } = await supabaseAdmin
+          .from('staff')
+          .select('availability_schedule')
+          .eq('id', staff_id)
+          .eq('is_active', true)
+          .single();
+        const schedule = staffRow?.availability_schedule;
+        // Normalize day key to lowercase (DB may store monday/Monday)
+        const staffSchedule = schedule?.[dayOfWeek] ?? schedule?.[dayOfWeek.toLowerCase()];
+        if (staffSchedule && (staffSchedule.closed === true || staffSchedule.closed === 'true')) {
+          return res.status(200).json({
+            success: true,
+            data: { available_slots: [] }
+          });
+        }
+        const staffOpen = staffSchedule?.opening ?? staffSchedule?.open;
+        const staffClose = staffSchedule?.closing ?? staffSchedule?.close;
+        const hasStaffTimes = (staffOpen !== undefined && staffOpen !== null && staffOpen !== '') &&
+          (staffClose !== undefined && staffClose !== null && staffClose !== '');
+        if (hasStaffTimes) {
+          businessHours = { open: staffOpen, close: staffClose, opening: staffOpen, closing: staffClose };
+        }
+      }
 
       if (!businessHours || businessHours.closed === true || businessHours.closed === 'true') {
         return res.status(200).json({
@@ -855,6 +880,13 @@ class BookingController {
       } else {
         openTime = businessHours.open || businessHours.opening;
         closeTime = businessHours.close || businessHours.closing;
+      }
+      // Normalize number (minutes) to "HH:mm" if backend stored minutes
+      if (typeof openTime === 'number') {
+        openTime = `${String(Math.floor(openTime / 60)).padStart(2, '0')}:${String(openTime % 60).padStart(2, '0')}`;
+      }
+      if (typeof closeTime === 'number') {
+        closeTime = `${String(Math.floor(closeTime / 60)).padStart(2, '0')}:${String(closeTime % 60).padStart(2, '0')}`;
       }
 
       if (!openTime || !closeTime) {
@@ -1057,6 +1089,18 @@ class BookingController {
         throw new AppError('Salon not found', 404, 'SALON_NOT_FOUND');
       }
 
+      // When staff_id provided, fetch staff availability for slot counts (calendar heatmap)
+      let staffSchedule = null;
+      if (staff_id) {
+        const { data: staffRow } = await supabaseAdmin
+          .from('staff')
+          .select('availability_schedule')
+          .eq('id', staff_id)
+          .eq('is_active', true)
+          .single();
+        staffSchedule = staffRow?.availability_schedule || null;
+      }
+
       // Get all bookings in date range
       let bookingsQuery = supabase
         .from('bookings')
@@ -1095,7 +1139,21 @@ class BookingController {
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         const dateStr = d.toISOString().split('T')[0];
         const dayOfWeek = days[d.getDay()];
-        const businessHours = salon.business_hours?.[dayOfWeek];
+        let businessHours = salon.business_hours?.[dayOfWeek];
+
+        // When staff_id provided, use staff's availability for this day (overrides salon)
+        if (staffSchedule) {
+          const staffDay = staffSchedule[dayOfWeek] ?? staffSchedule[dayOfWeek.toLowerCase()];
+          if (staffDay && (staffDay.closed === true || staffDay.closed === 'true')) {
+            slotsCountByDate[dateStr] = 0;
+            continue;
+          }
+          const staffOpen = staffDay?.opening ?? staffDay?.open;
+          const staffClose = staffDay?.closing ?? staffDay?.close;
+          if (staffOpen != null && staffClose != null && staffOpen !== '' && staffClose !== '') {
+            businessHours = { open: staffOpen, close: staffClose, opening: staffOpen, closing: staffClose };
+          }
+        }
 
         if (!businessHours || businessHours.closed === true || businessHours.closed === 'true') {
           slotsCountByDate[dateStr] = 0;
@@ -1114,6 +1172,14 @@ class BookingController {
         if (!openTime || !closeTime) {
           slotsCountByDate[dateStr] = 0;
           continue;
+        }
+
+        // Normalize number (minutes) to "HH:mm" if stored as number
+        if (typeof openTime === 'number') {
+          openTime = `${String(Math.floor(openTime / 60)).padStart(2, '0')}:${String(openTime % 60).padStart(2, '0')}`;
+        }
+        if (typeof closeTime === 'number') {
+          closeTime = `${String(Math.floor(closeTime / 60)).padStart(2, '0')}:${String(closeTime % 60).padStart(2, '0')}`;
         }
 
         const existingBookings = bookingsByDate[dateStr] || [];
@@ -1488,8 +1554,8 @@ class BookingController {
       const amountFinal = Math.max(0, Number(amount) || 0);
       console.log(`💵 Payment amount: ${amountFinal} (existing: ${existingPayment?.amount}, service_id: ${booking.service_id})`);
 
-      // Use 'succeeded' (Stripe-style); DB may disallow 'completed' via payments_status_check. UI treats both as paid.
-      const paidStatus = 'succeeded';
+      // Use 'completed' to match payments table CHECK (pending, completed, failed, refunded)
+      const paidStatus = 'completed';
 
       if (existingPayment) {
         const { error: updateError } = await supabaseAdmin
