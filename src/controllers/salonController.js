@@ -2206,6 +2206,7 @@ class SalonController {
       }
       statsByStaff[s.id] = {
         staff_id: s.id,
+        id: s.id, // Also include as 'id' for consistency
         name: s.name,
         email: s.email,
         phone: s.phone,
@@ -2213,6 +2214,7 @@ class SalonController {
         user_id: s.user_id,
         created_at: s.created_at,
         clocked_in_at: s.clocked_in_at || null,
+        availability_schedule: s.availability_schedule || null, // Include availability!
         avatar_url,
         bookings_count: 0,
         completed_count: 0,
