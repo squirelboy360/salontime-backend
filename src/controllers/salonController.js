@@ -7,12 +7,12 @@ const config = require('../config');
 
 const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
-/** Get avatar URL for a user: first from user_profiles, then from auth user_metadata (OAuth picture). */
+/** Get avatar URL for a user. user_profiles is source of truth (updated on upload); only use auth OAuth when profile has no avatar. */
 async function getAvatarForUserId(userId) {
   if (!userId) return null;
   const { data: up } = await supabaseAdmin.from('user_profiles').select('avatar_url, avatar').eq('id', userId).maybeSingle();
-  const url = up?.avatar_url || up?.avatar || null;
-  if (url) return url;
+  const fromProfile = (up?.avatar_url || up?.avatar || '').toString().trim();
+  if (fromProfile.length > 0) return fromProfile;
   const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
   const meta = authUser?.user?.user_metadata;
   return meta?.avatar_url || meta?.picture || null;
