@@ -411,6 +411,22 @@ class ReviewController {
     const clientId = req.user.id;
 
     try {
+      // Current user is the client for all "my reviews" - fetch once for response
+      let client = null;
+      try {
+        const userProfile = await supabaseService.getUserProfile(clientId);
+        if (userProfile) {
+          client = {
+            id: userProfile.id,
+            first_name: userProfile.first_name,
+            last_name: userProfile.last_name,
+            avatar_url: userProfile.avatar_url || userProfile.avatar || null,
+          };
+        }
+      } catch (e) {
+        console.error('Error fetching client profile for my-reviews:', e);
+      }
+
       // Use supabaseAdmin to bypass RLS and ensure we can fetch all reviews
       // First, get the reviews
       const { data: reviews, error } = await supabaseAdmin
@@ -497,6 +513,7 @@ class ReviewController {
 
           return {
             ...review,
+            client,
             salon: salon,
             booking: booking,
             service: service,
